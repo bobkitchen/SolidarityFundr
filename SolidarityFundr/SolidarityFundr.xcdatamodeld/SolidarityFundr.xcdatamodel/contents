@@ -1,9 +1,94 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="1" systemVersion="11A491" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="true" userDefinedModelVersionIdentifier="">
-    <entity name="Item" representedClassName="Item" syncable="YES" codeGenerationType="class">
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23231" systemVersion="24C5089c" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="true" userDefinedModelVersionIdentifier="">
+    <entity name="FundSettings" representedClassName="FundSettings" syncable="YES" codeGenerationType="class">
+        <attribute name="annualInterestRate" optional="YES" attributeType="Double" defaultValueString="0.13" usesScalarValueType="YES"/>
+        <attribute name="bobInitialInvestment" optional="YES" attributeType="Double" defaultValueString="100000" usesScalarValueType="YES"/>
+        <attribute name="bobRemainingInvestment" optional="YES" attributeType="Double" defaultValueString="100000" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="lastInterestAppliedDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="minimumFundBalance" optional="YES" attributeType="Double" defaultValueString="50000" usesScalarValueType="YES"/>
+        <attribute name="monthlyContribution" optional="YES" attributeType="Double" defaultValueString="2000" usesScalarValueType="YES"/>
+        <attribute name="totalInterestApplied" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="utilizationWarningThreshold" optional="YES" attributeType="Double" defaultValueString="0.6" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="Loan" representedClassName="Loan" syncable="YES" codeGenerationType="class">
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="balance" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="completedDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="dueDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="issueDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="loanID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="monthlyPayment" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="repaymentMonths" optional="YES" attributeType="Integer 16" defaultValueString="3" usesScalarValueType="YES"/>
+        <attribute name="status" optional="YES" attributeType="String" defaultValueString="active"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="member" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Member" inverseName="loans" inverseEntity="Member"/>
+        <relationship name="payments" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Payment" inverseName="loan" inverseEntity="Payment"/>
+    </entity>
+    <entity name="Member" representedClassName="Member" syncable="YES" codeGenerationType="class">
+        <attribute name="cashOutAmount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="cashOutDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="email" optional="YES" attributeType="String"/>
+        <attribute name="joinDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="memberID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="phoneNumber" optional="YES" attributeType="String"/>
+        <attribute name="role" optional="YES" attributeType="String"/>
+        <attribute name="status" optional="YES" attributeType="String" defaultValueString="active"/>
+        <attribute name="suspendedDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="totalContributions" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="loans" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Loan" inverseName="member" inverseEntity="Loan"/>
+        <relationship name="payments" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Payment" inverseName="member" inverseEntity="Payment"/>
+        <relationship name="transactions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Transaction" inverseName="member" inverseEntity="Transaction"/>
+    </entity>
+    <entity name="Payment" representedClassName="Payment" syncable="YES" codeGenerationType="class">
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="contributionAmount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="loanRepaymentAmount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="paymentDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="paymentID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="paymentMethod" optional="YES" attributeType="String" defaultValueString="cash"/>
+        <attribute name="type" optional="YES" attributeType="String"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="loan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Loan" inverseName="payments" inverseEntity="Loan"/>
+        <relationship name="member" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Member" inverseName="payments" inverseEntity="Member"/>
+        <relationship name="transaction" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="Transaction" inverseName="payment" inverseEntity="Transaction"/>
+    </entity>
+    <entity name="Transaction" representedClassName="Transaction" syncable="YES" codeGenerationType="class">
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="balance" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="transactionDescription" optional="YES" attributeType="String"/>
+        <attribute name="transactionDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="transactionID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="type" optional="YES" attributeType="String"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="member" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Member" inverseName="transactions" inverseEntity="Member"/>
+        <relationship name="payment" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Payment" inverseName="transaction" inverseEntity="Payment"/>
+    </entity>
+    <entity name="AuditLog" representedClassName="AuditLog" syncable="YES" codeGenerationType="class">
+        <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="details" optional="YES" attributeType="String"/>
+        <attribute name="deviceInfo" optional="YES" attributeType="String"/>
+        <attribute name="eventID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="eventType" optional="YES" attributeType="String"/>
+        <attribute name="loanID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="memberID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
     </entity>
     <elements>
-        <element name="Item" positionX="-63" positionY="-18" width="128" height="44"/>
+        <element name="FundSettings" positionX="-297" positionY="81" width="128" height="179"/>
+        <element name="Loan" positionX="99" positionY="-99" width="128" height="239"/>
+        <element name="Member" positionX="-297" positionY="-99" width="128" height="269"/>
+        <element name="Payment" positionX="-99" positionY="117" width="128" height="224"/>
+        <element name="Transaction" positionX="99" positionY="216" width="128" height="179"/>
+        <element name="AuditLog" positionX="-99" positionY="360" width="128" height="149"/>
     </elements>
 </model>
