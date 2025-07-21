@@ -21,26 +21,32 @@ struct DashboardView: View {
     var body: some View {
         #if os(macOS)
         if useLiquidGlass {
-            // Transcriptly-style layout: HStack with floating appearance
             HStack(spacing: 0) {
-                // Sidebar with fixed width based on collapsed state
+                // Sidebar
                 FloatingSidebar(
                     selectedSection: $selectedTab,
                     isCollapsed: $isSidebarCollapsed
                 )
                 .frame(width: sidebarWidth)
-                .padding(.leading, DesignSystem.sidebarPadding)
-                .padding(.trailing, DesignSystem.sidebarPadding / 2)
-                .padding(.vertical, DesignSystem.sidebarPadding)
-                .animation(DesignSystem.gentleSpring, value: isSidebarCollapsed)
+                // Remove all padding modifiers - let content extend to edges
                 
-                // Main content fills remaining space
+                // Main content
                 DetailView(selectedTab: selectedTab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .animation(DesignSystem.gentleSpring, value: isSidebarCollapsed)
+                    .background(Color(NSColor.windowBackgroundColor))
             }
             .frame(minWidth: isSidebarCollapsed ? 600 : 800, minHeight: 640)
-            .liquidGlassWindowBackground()
+            .background(Color(NSColor.windowBackgroundColor))
+            .onAppear {
+                #if os(macOS)
+                print("Window style should be applied")
+                if let window = NSApp.windows.first {
+                    print("Window style mask: \(window.styleMask)")
+                    print("Has title bar: \(window.styleMask.contains(.titled))")
+                    print("Has close button: \(window.styleMask.contains(.closable))")
+                }
+                #endif
+            }
         } else {
             // Original Design
             NavigationSplitView {
@@ -48,6 +54,7 @@ struct DashboardView: View {
             } detail: {
                 DetailView(selectedTab: selectedTab)
             }
+            .background(Color(NSColor.windowBackgroundColor))
         }
         #else
         TabView(selection: $selectedTab) {

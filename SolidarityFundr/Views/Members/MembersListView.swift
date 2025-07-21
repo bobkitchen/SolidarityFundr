@@ -30,7 +30,7 @@ struct MembersListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .searchable(text: $viewModel.searchText, prompt: "Search members...")
+        .background(Color(NSColor.windowBackgroundColor))
         .sheet(isPresented: $showingAddMember) {
             AddMemberSheet(viewModel: viewModel)
         }
@@ -52,34 +52,44 @@ struct MembersListView: View {
     
     private var memberStatisticsHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Title and toolbar
-            HStack {
-                Text("Members")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+            // Clean header matching Overview style
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Team Management")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 
-                Spacer()
-                
-                // Toolbar actions
-                Button {
-                    showingAddMember = true
-                } label: {
-                    Label("Add Member", systemImage: "plus")
-                }
-                
-                Menu {
+                HStack {
+                    Text("Members")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                    
+                    // Toolbar actions
                     Button {
-                        viewModel.loadMembers()
+                        showingAddMember = true
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label("Add Member", systemImage: "plus")
                     }
-                } label: {
-                    Label("More", systemImage: "ellipsis.circle")
+                    
+                    Menu {
+                        Button {
+                            viewModel.loadMembers()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
                 }
+                
+                Text(Date().formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundColor(Color.secondary.opacity(0.7))
             }
-            .padding(.horizontal)
-            .padding(.top, 16) // Normal padding - traffic lights will overlay
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
             
             // Statistics
             HStack(spacing: 20) {
@@ -110,9 +120,23 @@ struct MembersListView: View {
     }
     
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        VStack(spacing: 0) {
+            // Search bar
             HStack {
-                // Role Filter
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search members...", text: $viewModel.searchText)
+                    .textFieldStyle(.plain)
+            }
+            .padding(8)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(8)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    // Role Filter
                 Menu {
                     Button("All Roles") {
                         viewModel.selectedRole = nil
@@ -155,10 +179,11 @@ struct MembersListView: View {
                     .background(Color.secondary.opacity(0.1))
                     .cornerRadius(8)
                 }
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal)
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
     }
     
     private var membersList: some View {

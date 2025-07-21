@@ -51,6 +51,7 @@ class DataManager: ObservableObject {
         fetchMembers()
         fetchActiveLoans()
         fetchRecentTransactions()
+        createMissingTransactions()
     }
     
     // MARK: - Member Operations
@@ -183,6 +184,29 @@ class DataManager: ObservableObject {
     
     // MARK: - Payment Operations
     
+    func recalculateLoanBalance(_ loan: Loan) {
+        // Get all payments for this loan
+        let request = Payment.paymentsForLoan(loan)
+        let payments = (try? context.fetch(request)) ?? []
+        
+        // Calculate total paid
+        let totalPaid = payments.reduce(0) { $0 + $1.loanRepaymentAmount }
+        
+        // Update loan balance
+        loan.balance = max(0, loan.amount - totalPaid)
+        loan.updatedAt = Date()
+        
+        // Check if loan should be completed
+        if loan.balance == 0 && loan.loanStatus == .active {
+            completeLoan(loan)
+        }
+        
+        saveContext()
+        
+        // Notify that loan balance was updated
+        NotificationCenter.default.post(name: .loanBalanceUpdated, object: loan)
+    }
+    
     @discardableResult
     func processPayment(for member: Member, amount: Double, loan: Loan? = nil, method: PaymentMethod = .cash, paymentDate: Date = Date(), notes: String? = nil) throws -> Payment {
         let payment = Payment(context: context)
@@ -211,7 +235,7 @@ class DataManager: ObservableObject {
             
             let transaction = createTransaction(
                 for: member,
-                amount: amount,
+                amount: -amount,  // Negative for loan repayments
                 type: .loanRepayment,
                 description: "Loan payment: KSH \(Int(amount))"
             )
@@ -239,6 +263,83 @@ class DataManager: ObservableObject {
     }
     
     // MARK: - Transaction Operations
+    
+    func fixIncorrectTransactions() {
+        let request: NSFetchRequest<Payment> = Payment.fetchRequest()
+        
+        do {
+            let allPayments = try context.fetch(request)
+            var fixedCount = 0
+            
+            for payment in allPayments {
+                guard let transaction = payment.transaction else { continue }
+                
+                // Check if transaction type matches payment type
+                let expectedType: TransactionType = payment.paymentType == .loanRepayment ? .loanRepayment : .contribution
+                let expectedAmount = payment.paymentType == .loanRepayment ? -payment.amount : payment.amount
+                let expectedDescription = payment.paymentType == .loanRepayment ? "Loan payment: KSH \(Int(payment.amount))" : "Monthly contribution"
+                
+                if transaction.transactionType != expectedType || transaction.amount != expectedAmount {
+                    print("🔧 Fixing transaction for \(payment.member?.name ?? "Unknown")")
+                    print("   - Old type: \(transaction.transactionType.displayName), New type: \(expectedType.displayName)")
+                    print("   - Old amount: \(transaction.amount), New amount: \(expectedAmount)")
+                    
+                    transaction.transactionType = expectedType
+                    transaction.amount = expectedAmount
+                    transaction.transactionDescription = expectedDescription
+                    transaction.updatedAt = Date()
+                    
+                    fixedCount += 1
+                }
+            }
+            
+            if fixedCount > 0 {
+                saveContext()
+                print("✅ Fixed \(fixedCount) incorrect transactions")
+            } else {
+                print("✓ All transactions are correct")
+            }
+        } catch {
+            print("❌ Error fixing transactions: \(error)")
+        }
+    }
+    
+    func createMissingTransactions() {
+        let request: NSFetchRequest<Payment> = Payment.fetchRequest()
+        request.predicate = NSPredicate(format: "transaction == nil")
+        
+        do {
+            let paymentsWithoutTransactions = try context.fetch(request)
+            print("🔍 Found \(paymentsWithoutTransactions.count) payments without transactions")
+            
+            for payment in paymentsWithoutTransactions {
+                let transactionType: TransactionType = payment.paymentType == .loanRepayment ? .loanRepayment : .contribution
+                let amount = payment.paymentType == .loanRepayment ? -payment.amount : payment.amount
+                let description = payment.paymentType == .loanRepayment ? "Loan payment: KSH \(Int(payment.amount))" : "Monthly contribution"
+                
+                let transaction = Transaction(context: context)
+                transaction.transactionID = UUID()
+                transaction.member = payment.member
+                transaction.amount = amount
+                transaction.transactionType = transactionType
+                transaction.transactionDate = payment.paymentDate ?? Date()
+                transaction.transactionDescription = description
+                transaction.balance = fundSettings?.calculateFundBalance() ?? 0
+                transaction.createdAt = payment.createdAt ?? Date()
+                transaction.updatedAt = Date()
+                
+                payment.transaction = transaction
+                print("✅ Created transaction for payment: \(payment.member?.name ?? "Unknown") - \(transactionType.displayName)")
+            }
+            
+            if !paymentsWithoutTransactions.isEmpty {
+                saveContext()
+                print("💾 Saved \(paymentsWithoutTransactions.count) new transactions")
+            }
+        } catch {
+            print("❌ Error creating missing transactions: \(error)")
+        }
+    }
     
     func fetchRecentTransactions(limit: Int = 50) {
         let request = Transaction.fetchRequest()

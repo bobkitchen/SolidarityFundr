@@ -54,27 +54,30 @@ struct FloatingSidebar: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Toggle button at top
+            // Add space at the top for traffic lights
+            Color.clear
+                .frame(height: 28)
+                .frame(maxHeight: 28)
+            
+            // Rest of your sidebar content
+            if !isCollapsed {
+                sidebarHeader
+                    .padding(.horizontal, 16)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+            
+            // Toggle button
             HStack {
                 Spacer()
                 Button(action: toggleSidebar) {
                     Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.leading")
                         .font(.system(size: 12))
                         .foregroundColor(.tertiaryText)
-                        .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, isCollapsed ? 0 : 8)
             }
-            .padding(.top, 12)
-            .padding(.horizontal, isCollapsed ? 0 : 8)
-            
-            // Header - only show when expanded
-            if !isCollapsed {
-                sidebarHeader
-                    .padding(.top, 12)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             
             // Navigation items
             VStack(spacing: 2) {
@@ -83,37 +86,28 @@ struct FloatingSidebar: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.top, 4)
             
             Spacer()
             
-            // Fund Status - only show when expanded
+            // Fund status
             if !isCollapsed {
                 fundStatusCard
                     .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .padding(.bottom, 12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .performantGlass(
-            material: .regularMaterial,
-            cornerRadius: DesignSystem.cornerRadiusLarge,
-            strokeOpacity: 0.15
-        )
-        .adaptiveShadow(
-            isHovered: false,
-            baseRadius: 20,  // Deeper shadow for floating effect
-            baseOpacity: 0.25 // More prominent shadow
-        )
+        .background(DesignSystem.glassPrimary)
+        .cornerRadius(0) // Don't round corners - let window handle it
     }
     
     @ViewBuilder
     private var sidebarHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: "building.columns.fill")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundColor(.blue)
+            Image("AvocadoLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 40, height: 40)
             
             Text("Solidarity Fund")
                 .font(DesignSystem.Typography.cardTitle)

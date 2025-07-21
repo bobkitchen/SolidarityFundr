@@ -45,13 +45,8 @@ struct VisualEffectBackground: NSViewRepresentable {
 struct WindowBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(
-                VisualEffectBackground(
-                    material: .underWindowBackground,
-                    blendingMode: .behindWindow
-                )
-                .ignoresSafeArea()
-            )
+        // Don't set any background - let the window handle it
+        // Remove any custom corner radius modifications
     }
 }
 

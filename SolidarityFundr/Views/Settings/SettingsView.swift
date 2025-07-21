@@ -21,6 +21,8 @@ struct SettingsView: View {
     @State private var showingResetConfirmation = false
     @State private var showingSuccessAlert = false
     @State private var successMessage = ""
+    @State private var showingMessage = false
+    @State private var alertMessage = ""
     
     // Fund Settings
     @State private var monthlyContribution: String = ""
@@ -56,17 +58,27 @@ struct SettingsView: View {
         let _ = print("🔧 SettingsView: body called")
         
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Settings")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+            // Clean header matching Overview style
+            VStack(alignment: .leading, spacing: 8) {
+                Text("System Configuration")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 
-                Spacer()
+                HStack {
+                    Text("Settings")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                }
+                
+                Text(Date().formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundColor(Color.secondary.opacity(0.7))
             }
-            .padding(.horizontal)
-            .padding(.top, 16) // Normal padding - traffic lights will overlay
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
             
             ScrollView {
                 VStack(spacing: 20) {
@@ -110,6 +122,7 @@ struct SettingsView: View {
         }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(NSColor.windowBackgroundColor))
     .onAppear {
         print("🔧 SettingsView: onAppear called")
         loadSettings()
@@ -118,6 +131,11 @@ struct SettingsView: View {
         Button("OK") {}
     } message: {
         Text(successMessage)
+    }
+    .alert("Information", isPresented: $showingMessage) {
+        Button("OK") {}
+    } message: {
+        Text(alertMessage)
     }
     .fileImporter(
                 isPresented: $showingImport,
@@ -576,6 +594,24 @@ struct SettingsView: View {
                 }
             }
             .padding(.vertical, 4)
+            
+            Button {
+                dataManager.createMissingTransactions()
+                showingMessage = true
+                alertMessage = "Transaction linking process completed"
+            } label: {
+                Label("Fix Missing Transactions", systemImage: "link.badge.plus")
+            }
+            .help("Creates transaction records for any payments that don't have them")
+            
+            Button {
+                dataManager.fixIncorrectTransactions()
+                showingMessage = true
+                alertMessage = "Transaction correction process completed"
+            } label: {
+                Label("Fix Incorrect Transactions", systemImage: "exclamationmark.arrow.circlepath")
+            }
+            .help("Fixes transactions that don't match their payment type")
             
             Button(role: .destructive) {
                 showingResetConfirmation = true

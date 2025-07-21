@@ -6,11 +6,13 @@
 //
 
 import SwiftUI
+import Combine
 
 struct LoansListView: View {
     @StateObject private var viewModel = LoanViewModel()
     @State private var selectedLoan: Loan?
     @State private var showingNewLoan = false
+    @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +30,7 @@ struct LoansListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .searchable(text: $viewModel.searchText, prompt: "Search by member name...")
+        .background(Color(NSColor.windowBackgroundColor))
         .sheet(isPresented: $showingNewLoan) {
             NewLoanSheet()
         }
@@ -44,42 +46,61 @@ struct LoansListView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
+        .onAppear {
+            // Set up listener for loan balance updates
+            NotificationCenter.default.publisher(for: .loanBalanceUpdated)
+                .sink { _ in
+                    print("🔧 LoansListView: Loan balance updated, refreshing loans...")
+                    viewModel.loadLoans()
+                }
+                .store(in: &cancellables)
+        }
     }
     
     // MARK: - View Components
     
     private var fundStatusHeader: some View {
         VStack(spacing: 12) {
-            // Title and toolbar
-            HStack {
-                Text("Loans")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+            // Clean header matching Overview style
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Loan Management")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 
-                Spacer()
-                
-                // Toolbar actions
-                if !viewModel.eligibleMembers.isEmpty {
-                    Button {
-                        showingNewLoan = true
+                HStack {
+                    Text("Loans")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                    
+                    // Toolbar actions
+                    if !viewModel.eligibleMembers.isEmpty {
+                        Button {
+                            showingNewLoan = true
+                        } label: {
+                            Label("New Loan", systemImage: "plus")
+                        }
+                    }
+                    
+                    Menu {
+                        Button {
+                            viewModel.loadLoans()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
                     } label: {
-                        Label("New Loan", systemImage: "plus")
+                        Label("More", systemImage: "ellipsis.circle")
                     }
                 }
                 
-                Menu {
-                    Button {
-                        viewModel.loadLoans()
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                } label: {
-                    Label("More", systemImage: "ellipsis.circle")
-                }
+                Text(Date().formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundColor(Color.secondary.opacity(0.7))
             }
-            .padding(.horizontal)
-            .padding(.top, 16) // Normal padding - traffic lights will overlay
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
             
             // Fund Balance
             HStack {
@@ -132,9 +153,23 @@ struct LoansListView: View {
     }
     
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        VStack(spacing: 0) {
+            // Search bar
             HStack {
-                // Status Filter
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search by member name...", text: $viewModel.searchText)
+                    .textFieldStyle(.plain)
+            }
+            .padding(8)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(8)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    // Status Filter
                 Menu {
                     Button("All Status") {
                         viewModel.filterStatus = nil
@@ -161,10 +196,11 @@ struct LoansListView: View {
                     .toggleStyle(.button)
                     .buttonStyle(.bordered)
                     .tint(viewModel.showOverdueOnly ? .red : .secondary)
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal)
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
     }
     
     private var loansList: some View {

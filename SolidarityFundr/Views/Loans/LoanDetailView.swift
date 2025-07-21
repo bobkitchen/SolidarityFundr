@@ -73,6 +73,7 @@ struct LoanDetailView: View {
         }
         .sheet(isPresented: $showingPaymentForm) {
             PaymentFormView(
+                viewModel: PaymentViewModel(),
                 preselectedMember: loan.member,
                 preselectedLoan: loan
             )
@@ -555,11 +556,13 @@ struct EditLoanSheet: View {
     @ObservedObject var loan: Loan
     @Environment(\.dismiss) private var dismiss
     @State private var loanAmount: String = ""
+    @State private var loanBalance: String = ""
     @State private var repaymentMonths: Int = 3
     @State private var issueDate = Date()
     @State private var notes: String = ""
     @State private var showingError = false
     @State private var errorMessage = ""
+    @State private var showingRecalculateConfirmation = false
     
     var body: some View {
         NavigationStack {
@@ -570,6 +573,16 @@ struct EditLoanSheet: View {
                         Text("Amount")
                         Spacer()
                         TextField("0", text: $loanAmount)
+                            .multilineTextAlignment(.trailing)
+                        Text("KSH")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // Balance
+                    HStack {
+                        Text("Balance")
+                        Spacer()
+                        TextField("0", text: $loanBalance)
                             .multilineTextAlignment(.trailing)
                         Text("KSH")
                             .foregroundColor(.secondary)
@@ -600,12 +613,31 @@ struct EditLoanSheet: View {
                         .frame(minHeight: 100)
                 }
                 
+                Section("Balance Management") {
+                    Button {
+                        showingRecalculateConfirmation = true
+                    } label: {
+                        Label("Recalculate Balance from Payments", systemImage: "arrow.clockwise")
+                    }
+                    .foregroundColor(.blue)
+                    
+                    Text("This will recalculate the balance based on all loan payments")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
                 // Current vs New Comparison
                 Section("Changes") {
                     ComparisonRow(
                         label: "Amount",
                         current: CurrencyFormatter.shared.format(loan.amount),
                         new: CurrencyFormatter.shared.format(Double(loanAmount) ?? 0)
+                    )
+                    
+                    ComparisonRow(
+                        label: "Balance",
+                        current: CurrencyFormatter.shared.format(loan.balance),
+                        new: CurrencyFormatter.shared.format(Double(loanBalance) ?? 0)
                     )
                     
                     ComparisonRow(
@@ -650,11 +682,20 @@ struct EditLoanSheet: View {
             .onAppear {
                 setupInitialValues()
             }
+            .confirmationDialog("Recalculate Balance", isPresented: $showingRecalculateConfirmation) {
+                Button("Recalculate") {
+                    recalculateBalance()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will update the balance based on all payments made for this loan. Continue?")
+            }
         }
     }
     
     private func setupInitialValues() {
         loanAmount = String(Int(loan.amount))
+        loanBalance = String(Int(loan.balance))
         repaymentMonths = Int(loan.repaymentMonths)
         issueDate = loan.issueDate ?? Date()
         notes = loan.notes ?? ""
@@ -669,6 +710,11 @@ struct EditLoanSheet: View {
         return Calendar.current.date(byAdding: .month, value: repaymentMonths, to: issueDate) ?? issueDate
     }
     
+    private func recalculateBalance() {
+        DataManager.shared.recalculateLoanBalance(loan)
+        loanBalance = String(Int(loan.balance))
+    }
+    
     private func saveLoanChanges() {
         guard let newAmount = Double(loanAmount), newAmount > 0 else {
             errorMessage = "Please enter a valid loan amount"
@@ -676,16 +722,22 @@ struct EditLoanSheet: View {
             return
         }
         
-        // Validate that the new amount is not less than amount already paid
-        let amountPaid = loan.amount - loan.balance
-        if newAmount < amountPaid {
-            errorMessage = "New loan amount cannot be less than the amount already paid (KSH \(Int(amountPaid)))"
+        guard let newBalance = Double(loanBalance), newBalance >= 0 else {
+            errorMessage = "Please enter a valid loan balance"
+            showingError = true
+            return
+        }
+        
+        // Validate that balance is not greater than amount
+        if newBalance > newAmount {
+            errorMessage = "Loan balance cannot be greater than loan amount"
             showingError = true
             return
         }
         
         // Update loan properties
         loan.amount = newAmount
+        loan.balance = newBalance
         loan.repaymentMonths = Int16(repaymentMonths)
         loan.monthlyPayment = calculateMonthlyPayment()
         loan.issueDate = issueDate
@@ -693,14 +745,15 @@ struct EditLoanSheet: View {
         loan.notes = notes.isEmpty ? nil : notes
         loan.updatedAt = Date()
         
-        // Recalculate balance if amount changed
-        loan.balance = newAmount - amountPaid
-        
         // Save changes
         do {
             try loan.managedObjectContext?.save()
             // Notify DataManager to refresh loans
             DataManager.shared.fetchActiveLoans()
+            
+            // Post notification that loan was updated
+            NotificationCenter.default.post(name: .loanBalanceUpdated, object: loan)
+            
             dismiss()
         } catch {
             errorMessage = "Failed to save changes: \(error.localizedDescription)"

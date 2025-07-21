@@ -9,6 +9,7 @@ import SwiftUI
 import Charts
 import UniformTypeIdentifiers
 import PDFKit
+import Combine
 
 struct ReportsView: View {
     @EnvironmentObject var dataManager: DataManager
@@ -20,6 +21,8 @@ struct ReportsView: View {
     @State private var isGeneratingPDF = false
     @State private var showingError = false
     @State private var errorMessage = ""
+    @State private var refreshID = UUID()
+    @State private var cancellables = Set<AnyCancellable>()
     
     enum ReportType: String, CaseIterable {
         case fundOverview = "Fund Overview"
@@ -69,37 +72,68 @@ struct ReportsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
         .alert("Export Error", isPresented: $showingError) {
             Button("OK") {}
         } message: {
             Text(errorMessage)
         }
+        .onAppear {
+            setupNotificationListeners()
+        }
+        .id(refreshID)
+    }
+    
+    private func setupNotificationListeners() {
+        // Listen for payment updates
+        NotificationCenter.default.publisher(for: .paymentSaved)
+            .sink { _ in
+                refreshID = UUID()
+            }
+            .store(in: &cancellables)
+        
+        // Listen for loan balance updates
+        NotificationCenter.default.publisher(for: .loanBalanceUpdated)
+            .sink { _ in
+                refreshID = UUID()
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - View Components
     
     private var reportHeader: some View {
-        HStack {
-            Text("Reports")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Analytics & Insights")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
             
-            Spacer()
-            
-            Button {
-                generatePDF()
-            } label: {
-                if isGeneratingPDF {
-                    ProgressView()
-                } else {
-                    Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
+            HStack {
+                Text("Reports")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button {
+                    generatePDF()
+                } label: {
+                    if isGeneratingPDF {
+                        ProgressView()
+                    } else {
+                        Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
+                    }
                 }
+                .disabled(isGeneratingPDF)
             }
-            .disabled(isGeneratingPDF)
+            
+            Text(Date().formatted(date: .abbreviated, time: .omitted))
+                .font(.caption)
+                .foregroundColor(Color.secondary.opacity(0.7))
         }
-        .padding(.horizontal)
-        .padding(.top, 16) // Normal padding - traffic lights will overlay
-        .padding(.bottom, 12)
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 16)
     }
     
     private var reportTypeSelector: some View {
@@ -1232,7 +1266,7 @@ struct MemberTransactionHistory: View {
                             Text(CurrencyFormatter.shared.format(abs(transaction.amount)))
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(transaction.amount > 0 ? .green : .red)
+                                .foregroundColor(transaction.transactionType.isCredit ? .green : .red)
                             
                             if let description = transaction.transactionDescription {
                                 Text(description)

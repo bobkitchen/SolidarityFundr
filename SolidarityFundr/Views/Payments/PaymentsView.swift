@@ -6,11 +6,16 @@
 //
 
 import SwiftUI
+import Combine
 
 struct PaymentsView: View {
     @StateObject private var viewModel = PaymentViewModel()
     @State private var showingNewPayment = false
     @State private var selectedPayment: Payment?
+    // Removed sheet-based edit state variables as we're using windows now
+    @State private var showingDeleteConfirmation = false
+    @State private var paymentToDelete: Payment?
+    @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -31,12 +36,35 @@ struct PaymentsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .searchable(text: $viewModel.searchText, prompt: "Search by member name...")
+        .background(Color(NSColor.windowBackgroundColor))
         .sheet(isPresented: $showingNewPayment) {
-            PaymentFormView()
+            PaymentFormView(viewModel: viewModel)
         }
+        // Edit window is now handled by PaymentEditWindowController
         .onAppear {
             viewModel.loadPayments()
+            
+            // Set up listener for the paymentSaved notification
+            NotificationCenter.default.publisher(for: .paymentSaved)
+                .sink { _ in
+                    print("🔧 PaymentsView: Payment saved notification received, reloading payments...")
+                    viewModel.loadPayments()
+                }
+                .store(in: &cancellables)
+        }
+        .confirmationDialog(
+            "Delete Payment",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let payment = paymentToDelete {
+                    viewModel.deletePayment(payment)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to delete this payment? This action cannot be undone.")
         }
     }
     
@@ -44,42 +72,52 @@ struct PaymentsView: View {
     
     private var paymentSummaryHeader: some View {
         VStack(spacing: 12) {
-            // Title and toolbar
-            HStack {
-                Text("Payments")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+            // Clean header matching Overview style
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Financial Records")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 
-                Spacer()
-                
-                // Toolbar actions
-                Button {
-                    showingNewPayment = true
-                } label: {
-                    Label("New Payment", systemImage: "plus")
-                }
-                
-                Menu {
+                HStack {
+                    Text("Payments")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                    
+                    // Toolbar actions
                     Button {
-                        viewModel.loadPayments()
+                        showingNewPayment = true
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label("New Payment", systemImage: "plus")
                     }
                     
-                    Divider()
-                    
-                    Button {
-                        exportPayments()
+                    Menu {
+                        Button {
+                            viewModel.loadPayments()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        
+                        Divider()
+                        
+                        Button {
+                            exportPayments()
+                        } label: {
+                            Label("Export CSV", systemImage: "square.and.arrow.up")
+                        }
                     } label: {
-                        Label("Export CSV", systemImage: "square.and.arrow.up")
+                        Label("More", systemImage: "ellipsis.circle")
                     }
-                } label: {
-                    Label("More", systemImage: "ellipsis.circle")
                 }
+                
+                Text(Date().formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundColor(Color.secondary.opacity(0.7))
             }
-            .padding(.horizontal)
-            .padding(.top, 16) // Normal padding - traffic lights will overlay
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
             
             HStack(spacing: 20) {
                 SummaryCard(
@@ -145,9 +183,23 @@ struct PaymentsView: View {
     }
     
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        VStack(spacing: 0) {
+            // Search bar
             HStack {
-                // Payment Type Filter
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search by member name...", text: $viewModel.searchText)
+                    .textFieldStyle(.plain)
+            }
+            .padding(8)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(8)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    // Payment Type Filter
                 Menu {
                     Button("All Types") {
                         viewModel.filterType = nil
@@ -190,10 +242,11 @@ struct PaymentsView: View {
                     .background(Color.secondary.opacity(0.1))
                     .cornerRadius(8)
                 }
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal)
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
     }
     
     private var paymentsList: some View {
@@ -201,6 +254,51 @@ struct PaymentsView: View {
             ForEach(viewModel.filteredPayments) { payment in
                 PaymentRowView(payment: payment) {
                     selectedPayment = payment
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        paymentToDelete = payment
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    
+                    Button {
+                        print("🔧 PaymentsView: Opening edit window for payment - \(payment.member?.name ?? "Unknown")")
+                        PaymentEditWindowController.openEditWindow(for: payment) {
+                            // Refresh payments list when edit is complete
+                            viewModel.loadPayments()
+                        }
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .tint(.blue)
+                }
+                .contextMenu {
+                    Button {
+                        print("🔧 PaymentsView: Opening edit window for payment - \(payment.member?.name ?? "Unknown")")
+                        PaymentEditWindowController.openEditWindow(for: payment) {
+                            // Refresh payments list when edit is complete
+                            viewModel.loadPayments()
+                        }
+                    } label: {
+                        Label("Edit Payment", systemImage: "pencil")
+                    }
+                    
+                    Button {
+                        selectedPayment = payment
+                    } label: {
+                        Label("View Details", systemImage: "info.circle")
+                    }
+                    
+                    Divider()
+                    
+                    Button(role: .destructive) {
+                        paymentToDelete = payment
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Payment", systemImage: "trash")
+                    }
                 }
             }
         }

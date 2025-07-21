@@ -12,7 +12,7 @@ struct SolidarityFundrApp: App {
     let persistenceController = PersistenceController.shared
     @StateObject private var dataManager = DataManager.shared
     @StateObject private var authManager = AuthenticationManager.shared
-    @NSApplicationDelegateAdaptor(WindowConfigurator.self) var windowConfigurator
+    // Remove WindowConfigurator - not needed for macOS 26 compliance
 
     var body: some Scene {
         WindowGroup {
@@ -33,7 +33,11 @@ struct SolidarityFundrApp: App {
             #endif
         }
         #if os(macOS)
-        .windowToolbarStyle(.unifiedCompact)
+        // IMPORTANT: Use .automatic instead of .plain to get traffic lights
+        .windowStyle(.automatic)
+        // Keep the hidden title bar for integrated look
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {

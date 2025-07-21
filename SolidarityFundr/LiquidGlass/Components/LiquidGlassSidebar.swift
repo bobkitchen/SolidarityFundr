@@ -27,9 +27,10 @@ struct LiquidGlassSidebar: View {
         VStack(spacing: 12) {
             // App Title - Left aligned as per requirements
             VStack(alignment: .leading, spacing: 4) {
-                Image(systemName: "building.columns.fill")
-                    .font(.system(size: 32, weight: .medium))
-                    .foregroundColor(.blue)
+                Image("AvocadoLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 40, height: 40)
                 
                 Text("Solidarity Fund")
                     .font(.system(size: 18, weight: .bold))

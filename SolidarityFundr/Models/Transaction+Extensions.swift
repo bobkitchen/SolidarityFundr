@@ -84,9 +84,9 @@ enum TransactionType: String, CaseIterable {
     
     var isCredit: Bool {
         switch self {
-        case .contribution, .loanRepayment, .interestApplied, .bobInvestment:
+        case .contribution, .interestApplied, .bobInvestment:
             return true
-        case .loanDisbursement, .cashOut, .bobWithdrawal:
+        case .loanDisbursement, .loanRepayment, .cashOut, .bobWithdrawal:
             return false
         }
     }

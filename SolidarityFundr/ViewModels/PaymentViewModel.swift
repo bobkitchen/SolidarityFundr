@@ -38,6 +38,10 @@ class PaymentViewModel: ObservableObject {
     @Published var contributionAmount: Double = 0
     @Published var loanRepaymentAmount: Double = 0
     
+    // Edit mode
+    @Published var isEditMode = false
+    @Published var editingPayment: Payment?
+    
     private let dataManager = DataManager.shared
     private let businessRules = BusinessRulesEngine.shared
     private var cancellables = Set<AnyCancellable>()
@@ -287,6 +291,8 @@ class PaymentViewModel: ObservableObject {
         contributionAmount = 0
         loanRepaymentAmount = 0
         validationWarnings = []
+        isEditMode = false
+        editingPayment = nil
     }
     
     func prepareNewPayment() {
@@ -302,6 +308,197 @@ class PaymentViewModel: ObservableObject {
     private func clearError() {
         errorMessage = nil
         showingError = false
+    }
+    
+    // MARK: - Edit Operations
+    
+    func loadPaymentForEditing(_ payment: Payment) {
+        print("🔧 PaymentViewModel: Loading payment for editing - \(payment.member?.name ?? "Unknown")")
+        editingPayment = payment
+        isEditMode = true
+        
+        // Populate form fields with existing payment data
+        selectedMember = payment.member
+        paymentAmount = String(format: "%.0f", payment.amount)
+        paymentMethod = payment.paymentMethodType
+        paymentNotes = payment.notes ?? ""
+        paymentDate = payment.paymentDate ?? Date()
+        
+        // Determine if it's a loan payment
+        if payment.loan != nil {
+            isLoanPayment = true
+            selectedLoan = payment.loan
+        } else {
+            isLoanPayment = false
+            selectedLoan = nil
+        }
+        
+        // Set breakdown amounts
+        contributionAmount = payment.contributionAmount
+        loanRepaymentAmount = payment.loanRepaymentAmount
+        
+        print("🔧 PaymentViewModel: Edit mode setup complete - Member: \(selectedMember?.name ?? "nil"), Amount: \(paymentAmount)")
+    }
+    
+    func updatePayment() {
+        guard let payment = editingPayment,
+              let member = selectedMember,
+              let amount = Double(paymentAmount) else {
+            errorMessage = "Invalid payment data"
+            showingError = true
+            return
+        }
+        
+        clearError()
+        
+        // Validate the updated payment
+        let paymentType: PaymentType = isLoanPayment ? .loanRepayment : .contribution
+        let validation = businessRules.validatePayment(
+            member: member,
+            amount: amount,
+            loan: selectedLoan,
+            paymentType: paymentType
+        )
+        
+        if !validation.isValid {
+            errorMessage = validation.errorMessage
+            showingError = true
+            return
+        }
+        
+        do {
+            // Store the previous loan if the payment type is changing
+            let previousLoan = payment.loan
+            let wasLoanPayment = payment.paymentType == .loanRepayment
+            
+            // Update payment properties
+            payment.amount = amount
+            payment.paymentMethodType = paymentMethod
+            payment.notes = paymentNotes.isEmpty ? nil : paymentNotes
+            payment.paymentDate = paymentDate
+            payment.updatedAt = Date()
+            
+            // Update payment type and loan association
+            if isLoanPayment && selectedLoan != nil {
+                payment.paymentType = .loanRepayment
+                payment.loan = selectedLoan
+                payment.loanRepaymentAmount = amount
+                payment.contributionAmount = 0
+            } else {
+                payment.paymentType = .contribution
+                payment.loan = nil
+                payment.loanRepaymentAmount = 0
+                payment.contributionAmount = amount
+            }
+            
+            // Update the associated transaction if it exists
+            if let transaction = payment.transaction {
+                print("🔄 Updating transaction - Transaction ID: \(transaction.transactionID?.uuidString ?? "nil")")
+                print("   - Old type: \(transaction.transactionType.displayName), New type: \(isLoanPayment ? "Loan Repayment" : "Contribution")")
+                print("   - Old amount: \(transaction.amount), New amount: \(isLoanPayment ? -amount : amount)")
+                
+                // Force the transaction to be marked as updated
+                transaction.objectWillChange.send()
+                
+                transaction.amount = isLoanPayment ? -amount : amount
+                transaction.transactionType = isLoanPayment ? .loanRepayment : .contribution
+                transaction.transactionDescription = isLoanPayment ? "Loan payment: KSH \(Int(amount))" : "Monthly contribution"
+                transaction.transactionDate = paymentDate
+                transaction.updatedAt = Date()
+                
+                // Verify the changes
+                print("🔄 Transaction after update:")
+                print("   - Type: \(transaction.transactionType.displayName)")
+                print("   - Amount: \(transaction.amount)")
+                print("   - Description: \(transaction.transactionDescription ?? "nil")")
+                print("   - Updated at: \(transaction.updatedAt ?? Date())")
+            } else {
+                print("⚠️ No transaction found for payment - Creating new transaction")
+                
+                // Create a new transaction if one doesn't exist
+                let newTransaction = Transaction(context: PersistenceController.shared.container.viewContext)
+                newTransaction.transactionID = UUID()
+                newTransaction.member = member
+                newTransaction.amount = isLoanPayment ? -amount : amount
+                newTransaction.transactionType = isLoanPayment ? .loanRepayment : .contribution
+                newTransaction.transactionDescription = isLoanPayment ? "Loan payment: KSH \(Int(amount))" : "Monthly contribution"
+                newTransaction.transactionDate = paymentDate
+                newTransaction.balance = 0 // This should be recalculated by the fund
+                newTransaction.createdAt = payment.createdAt ?? Date()
+                newTransaction.updatedAt = Date()
+                
+                payment.transaction = newTransaction
+                print("✅ Created new transaction for payment")
+            }
+            
+            // Save changes
+            try PersistenceController.shared.container.viewContext.save()
+            
+            // Force refresh of the managed objects to ensure UI updates
+            PersistenceController.shared.container.viewContext.refresh(payment, mergeChanges: true)
+            if let transaction = payment.transaction {
+                PersistenceController.shared.container.viewContext.refresh(transaction, mergeChanges: true)
+                print("🔄 Transaction refreshed - Final state:")
+                print("   - Type: \(transaction.transactionType.displayName)")
+                print("   - Amount: \(transaction.amount)")
+            }
+            
+            // Recalculate loan balances if payment type changed or loan changed
+            if wasLoanPayment && previousLoan != nil {
+                // Recalculate the previous loan's balance
+                dataManager.recalculateLoanBalance(previousLoan!)
+            }
+            
+            if isLoanPayment && selectedLoan != nil {
+                // Recalculate the current loan's balance
+                dataManager.recalculateLoanBalance(selectedLoan!)
+            }
+            
+            // Clear form and reload
+            clearNewPaymentForm()
+            isEditMode = false
+            editingPayment = nil
+            loadPayments()
+            
+            // Notify that payment was saved
+            NotificationCenter.default.post(name: .paymentSaved, object: nil)
+            
+            // Show success
+            showingNewPayment = false
+        } catch {
+            errorMessage = "Failed to update payment: \(error.localizedDescription)"
+            showingError = true
+        }
+    }
+    
+    func deletePayment(_ payment: Payment) {
+        do {
+            // Store loan reference before deletion
+            let affectedLoan = payment.loan
+            let wasLoanPayment = payment.paymentType == .loanRepayment
+            
+            // Delete associated transaction if exists
+            if let transaction = payment.transaction {
+                PersistenceController.shared.container.viewContext.delete(transaction)
+            }
+            
+            // Delete payment
+            PersistenceController.shared.container.viewContext.delete(payment)
+            
+            // Save changes
+            try PersistenceController.shared.container.viewContext.save()
+            
+            // Recalculate loan balance if this was a loan payment
+            if wasLoanPayment && affectedLoan != nil {
+                dataManager.recalculateLoanBalance(affectedLoan!)
+            }
+            
+            // Reload payments
+            loadPayments()
+        } catch {
+            errorMessage = "Failed to delete payment: \(error.localizedDescription)"
+            showingError = true
+        }
     }
     
     // MARK: - Formatting Helpers

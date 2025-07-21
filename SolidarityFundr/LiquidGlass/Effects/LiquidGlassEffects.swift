@@ -238,3 +238,34 @@ extension View {
         )
     }
 }
+
+// MARK: - Liquid Glass Sidebar
+
+extension View {
+    func liquidGlassSidebar() -> some View {
+        self
+            .background(
+                ZStack {
+                    // Base glass material
+                    RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge)
+                        .fill(.regularMaterial)
+                    
+                    // Subtle gradient overlay for depth
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.05),
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 60)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge)
+                    .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
+            )
+    }
+}

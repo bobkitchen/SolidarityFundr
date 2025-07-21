@@ -96,7 +96,10 @@ struct MemberDetailView: View {
             MemberNewLoanSheet(preselectedMember: member)
         }
         .sheet(isPresented: $showingNewPayment) {
-            PaymentFormView(preselectedMember: member)
+            PaymentFormView(
+                viewModel: PaymentViewModel(),
+                preselectedMember: member
+            )
         }
         .confirmationDialog(
             "Cash Out Member",

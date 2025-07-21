@@ -8,20 +8,27 @@
 import SwiftUI
 
 struct PaymentFormView: View {
-    @StateObject private var viewModel = PaymentViewModel()
+    @ObservedObject var viewModel: PaymentViewModel
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
     
     let preselectedMember: Member?
     let preselectedLoan: Loan?
+    let editingPayment: Payment?
     
     enum Field {
         case amount
     }
     
-    init(preselectedMember: Member? = nil, preselectedLoan: Loan? = nil) {
+    init(viewModel: PaymentViewModel, 
+         preselectedMember: Member? = nil, 
+         preselectedLoan: Loan? = nil,
+         editingPayment: Payment? = nil) {
+        print("🔧 PaymentFormView: init - editingPayment: \(editingPayment?.member?.name ?? "nil")")
+        self._viewModel = ObservedObject(wrappedValue: viewModel)
         self.preselectedMember = preselectedMember
         self.preselectedLoan = preselectedLoan
+        self.editingPayment = editingPayment
     }
     
     var body: some View {
@@ -53,7 +60,7 @@ struct PaymentFormView: View {
                     warningsSection
                 }
             }
-            .navigationTitle("New Payment")
+            .navigationTitle(viewModel.isEditMode ? "Edit Payment" : "New Payment")
             .toolbar {
                 toolbarContent
             }
@@ -65,6 +72,11 @@ struct PaymentFormView: View {
             .onAppear {
                 setupInitialState()
             }
+            .onChange(of: editingPayment) { newPayment in
+                if let payment = newPayment {
+                    viewModel.loadPaymentForEditing(payment)
+                }
+            }
         }
     }
     
@@ -72,7 +84,40 @@ struct PaymentFormView: View {
     
     private var memberSection: some View {
         Section("Member") {
-            if let preselectedMember = preselectedMember {
+            if viewModel.isEditMode, let member = viewModel.selectedMember {
+                // In edit mode, show the selected member (read-only)
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(member.name ?? "Unknown")
+                            .font(.headline)
+                        HStack {
+                            Text(member.memberRole.displayName)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            if member.hasActiveLoans {
+                                Text("•")
+                                    .foregroundColor(.secondary)
+                                Label("Has active loan", systemImage: "creditcard.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Balance")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(CurrencyFormatter.shared.format(member.totalContributions))
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                }
+                .padding(.vertical, 4)
+            } else if let preselectedMember = preselectedMember {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(preselectedMember.name ?? "Unknown")
@@ -279,23 +324,41 @@ struct PaymentFormView: View {
     // MARK: - Helper Methods
     
     private func setupInitialState() {
-        if let member = preselectedMember {
-            viewModel.selectedMember = member
+        print("🔧 PaymentFormView: setupInitialState - editingPayment: \(editingPayment != nil)")
+        
+        // Check if we have an editing payment to load
+        if let payment = editingPayment {
+            // Load payment for editing
+            print("🔧 PaymentFormView: Loading payment for editing - \(payment.member?.name ?? "Unknown")")
+            viewModel.loadPaymentForEditing(payment)
+        } else if !viewModel.isEditMode {
+            // New payment setup only if not already in edit mode
+            print("🔧 PaymentFormView: Setting up new payment")
+            if let member = preselectedMember {
+                viewModel.selectedMember = member
+            }
+            
+            if let loan = preselectedLoan {
+                viewModel.selectedLoan = loan
+                viewModel.isLoanPayment = true
+            }
         }
         
-        if let loan = preselectedLoan {
-            viewModel.selectedLoan = loan
-            viewModel.isLoanPayment = true
-        }
-        
-        // Focus on amount field after a slight delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            focusedField = .amount
+        // Focus on amount field after a slight delay for new payments only
+        if editingPayment == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusedField = .amount
+            }
         }
     }
     
     private func processPayment() {
-        viewModel.processPayment()
+        if viewModel.isEditMode {
+            viewModel.updatePayment()
+        } else {
+            viewModel.processPayment()
+        }
+        
         if !viewModel.showingError {
             dismiss()
         }
@@ -363,6 +426,6 @@ struct LoanInfoRow: View {
 }
 
 #Preview {
-    PaymentFormView()
+    PaymentFormView(viewModel: PaymentViewModel())
         .environmentObject(DataManager.shared)
 }

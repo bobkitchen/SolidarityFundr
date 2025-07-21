@@ -28,9 +28,10 @@ struct AuthenticationView: View {
             VStack(spacing: 40) {
                 // Logo and Title
                 VStack(spacing: 20) {
-                    Image(systemName: "building.2.crop.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.accentColor)
+                    Image("AvocadoLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 80, height: 80)
                     
                     Text("Parachichi House")
                         .font(.largeTitle)
