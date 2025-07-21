@@ -41,6 +41,7 @@ enum SidebarSection: String, CaseIterable {
 
 struct FloatingSidebar: View {
     @Binding var selectedSection: Int
+    @Binding var isCollapsed: Bool
     @State private var hoveredSection: SidebarSection?
     @EnvironmentObject var dataManager: DataManager
     
@@ -53,14 +54,27 @@ struct FloatingSidebar: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // 28px drag region for traffic lights as per macOS 26 guide
-            Color.clear
-                .frame(height: 28)
-                .contentShape(Rectangle())
+            // Toggle button at top
+            HStack {
+                Spacer()
+                Button(action: toggleSidebar) {
+                    Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.leading")
+                        .font(.system(size: 12))
+                        .foregroundColor(.tertiaryText)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, isCollapsed ? 0 : 8)
+            }
+            .padding(.top, 12)
+            .padding(.horizontal, isCollapsed ? 0 : 8)
             
-            // Header with 12px inset from drag region
-            sidebarHeader
-                .padding(.top, 12)
+            // Header - only show when expanded
+            if !isCollapsed {
+                sidebarHeader
+                    .padding(.top, 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
             
             // Navigation items
             VStack(spacing: 2) {
@@ -69,17 +83,29 @@ struct FloatingSidebar: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.top, 4) // Small gap after header
+            .padding(.top, 4)
             
             Spacer()
             
-            // Fund Status
-            fundStatusCard
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+            // Fund Status - only show when expanded
+            if !isCollapsed {
+                fundStatusCard
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial) // Use ultraThinMaterial as per macOS 26 guide
+        .performantGlass(
+            material: .regularMaterial,
+            cornerRadius: DesignSystem.cornerRadiusLarge,
+            strokeOpacity: 0.15
+        )
+        .adaptiveShadow(
+            isHovered: false,
+            baseRadius: 20,  // Deeper shadow for floating effect
+            baseOpacity: 0.25 // More prominent shadow
+        )
     }
     
     @ViewBuilder
@@ -107,22 +133,26 @@ struct FloatingSidebar: View {
         Button(action: {
             selectedSection = SidebarSection.allCases.firstIndex(of: section) ?? 0
         }) {
-            HStack(spacing: 12) {
+            HStack(spacing: isCollapsed ? 0 : 12) {
                 Image(systemName: section.icon)
                     .font(.system(size: 16))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundColor(itemIconColor(for: section))
                     .frame(width: 20)
+                    .frame(maxWidth: isCollapsed ? .infinity : nil)
                 
-                Text(section.rawValue)
-                    .font(currentSection == section ? DesignSystem.Typography.navItemSelected : DesignSystem.Typography.navItem)
-                    .foregroundColor(itemTextColor(for: section))
-                
-                Spacer()
+                if !isCollapsed {
+                    Text(section.rawValue)
+                        .font(currentSection == section ? DesignSystem.Typography.navItemSelected : DesignSystem.Typography.navItem)
+                        .foregroundColor(itemTextColor(for: section))
+                        .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .leading)))
+                    
+                    Spacer()
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 6)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, isCollapsed ? 8 : 12)
             .background(itemBackground(for: section))
             .contentShape(Rectangle())
         }
@@ -209,6 +239,12 @@ struct FloatingSidebar: View {
             return .green
         }
     }
+    
+    private func toggleSidebar() {
+        withAnimation(DesignSystem.gentleSpring) {
+            isCollapsed.toggle()
+        }
+    }
 }
 
 // MARK: - Status Row
@@ -233,9 +269,12 @@ private struct FundStatusRow: View {
 
 #Preview {
     HStack {
-        FloatingSidebar(selectedSection: .constant(0))
-            .frame(width: DesignSystem.sidebarExpandedWidth)
-            .environmentObject(DataManager.shared)
+        FloatingSidebar(
+            selectedSection: .constant(0),
+            isCollapsed: .constant(false)
+        )
+        .frame(width: DesignSystem.sidebarExpandedWidth)
+        .environmentObject(DataManager.shared)
         Spacer()
     }
     .padding(DesignSystem.sidebarPadding)

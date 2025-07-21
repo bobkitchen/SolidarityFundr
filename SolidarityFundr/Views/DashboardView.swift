@@ -12,24 +12,34 @@ struct DashboardView: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var selectedTab = 0
     @AppStorage("useLiquidGlass") private var useLiquidGlass: Bool = true
+    @AppStorage("isSidebarCollapsed") private var isSidebarCollapsed: Bool = false
+    
+    private var sidebarWidth: CGFloat {
+        isSidebarCollapsed ? 68 : DesignSystem.sidebarExpandedWidth
+    }
     
     var body: some View {
         #if os(macOS)
         if useLiquidGlass {
-            // Liquid Glass Design - Proper floating sidebar implementation
+            // Transcriptly-style layout: HStack with floating appearance
             HStack(spacing: 0) {
-                // Sidebar - fixed width with padding for floating effect
-                FloatingSidebar(selectedSection: $selectedTab)
-                    .frame(width: DesignSystem.sidebarExpandedWidth)
-                    .padding(.leading, DesignSystem.sidebarPadding)
-                    .padding(.trailing, DesignSystem.sidebarPadding / 2) // Half padding on right
-                    .padding(.vertical, DesignSystem.sidebarPadding)
+                // Sidebar with fixed width based on collapsed state
+                FloatingSidebar(
+                    selectedSection: $selectedTab,
+                    isCollapsed: $isSidebarCollapsed
+                )
+                .frame(width: sidebarWidth)
+                .padding(.leading, DesignSystem.sidebarPadding)
+                .padding(.trailing, DesignSystem.sidebarPadding / 2)
+                .padding(.vertical, DesignSystem.sidebarPadding)
+                .animation(DesignSystem.gentleSpring, value: isSidebarCollapsed)
                 
                 // Main content fills remaining space
                 DetailView(selectedTab: selectedTab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .animation(DesignSystem.gentleSpring, value: isSidebarCollapsed)
             }
-            .frame(minWidth: 800, minHeight: 640)
+            .frame(minWidth: isSidebarCollapsed ? 600 : 800, minHeight: 640)
             .liquidGlassWindowBackground()
         } else {
             // Original Design

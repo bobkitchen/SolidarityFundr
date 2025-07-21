@@ -29,11 +29,11 @@ struct SolidarityFundrApp: App {
             }
             .animation(.easeInOut, value: authManager.isAuthenticated)
             #if os(macOS)
-            .ignoresSafeArea(.all, edges: .top) // Allow content under title bar
+            .frame(minWidth: 900, minHeight: 700)
             #endif
         }
         #if os(macOS)
-        .windowStyle(.plain)
+        .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {
