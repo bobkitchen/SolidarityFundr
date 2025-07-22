@@ -277,6 +277,19 @@ struct ActivityChartCard: View {
         return (fundValue, loanValue)
     }
     
+    private func calculateChartDomain(min: Double, max: Double, padding: Double) -> ClosedRange<Double> {
+        // Calculate safe chart bounds
+        let chartMin = Swift.min(min - padding, 0)
+        let chartMax = Swift.max(max + padding, chartMin + 10000)
+        
+        // Ensure we have a valid range
+        if chartMin >= chartMax {
+            return 0...100000
+        }
+        
+        return chartMin...chartMax
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -295,12 +308,19 @@ struct ActivityChartCard: View {
             }
             
             // Actual Chart with proper clipping
-            if !chartData.fundBalance.isEmpty {
+            if !chartData.fundBalance.isEmpty && !chartData.loanBalance.isEmpty {
                 let allValues = chartData.fundBalance.map { $0.value } + chartData.loanBalance.map { $0.value }
                 let minValue = allValues.min() ?? 0
                 let maxValue = allValues.max() ?? 100000
-                let hasVariation = (maxValue - minValue) > 100 // Check if there's meaningful variation
-                let padding = hasVariation ? (maxValue - minValue) * 0.1 : maxValue * 0.1
+                
+                // Ensure values are finite
+                let safeMinValue = minValue.isFinite ? minValue : 0
+                let safeMaxValue = maxValue.isFinite ? maxValue : 100000
+                
+                // Calculate safe padding
+                let hasVariation = (safeMaxValue - safeMinValue) > 100
+                let rawPadding = hasVariation ? (safeMaxValue - safeMinValue) * 0.1 : safeMaxValue * 0.1
+                let padding = rawPadding.isFinite && rawPadding > 0 ? rawPadding : 1000
                 
                 Chart {
                     // Fund Balance Line
@@ -351,7 +371,7 @@ struct ActivityChartCard: View {
                     }
                 }
                 .frame(height: 200)
-                .chartYScale(domain: hasVariation ? (minValue - padding)...(maxValue + padding) : 0...(maxValue + padding))
+                .chartYScale(domain: calculateChartDomain(min: safeMinValue, max: safeMaxValue, padding: padding))
                 .chartXAxis {
                     AxisMarks(preset: .aligned) { _ in
                         AxisGridLine()
