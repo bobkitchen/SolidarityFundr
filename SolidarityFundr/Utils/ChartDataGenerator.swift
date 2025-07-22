@@ -63,32 +63,56 @@ class ChartDataGenerator {
         // Generate data points
         var fundDataPoints: [(date: Date, value: Double)] = []
         var loanDataPoints: [(date: Date, value: Double)] = []
-        var currentDate = startDate
         
         // Add starting point
         fundDataPoints.append((date: startDate, value: startingFundBalance))
         loanDataPoints.append((date: startDate, value: startingLoanBalance))
         
-        while currentDate <= endDate {
-            // Find the last transaction up to this date
-            let lastTransaction = transactions
-                .filter { ($0.transactionDate ?? Date.distantPast) <= currentDate }
-                .last
-            
-            let fundBalance = lastTransaction?.balance ?? startingFundBalance
-            let loanBalance = lastTransaction?.loanBalance ?? startingLoanBalance
-            
-            fundDataPoints.append((date: currentDate, value: fundBalance))
-            loanDataPoints.append((date: currentDate, value: loanBalance))
-            
-            currentDate = calendar.date(byAdding: interval, value: 1, to: currentDate) ?? endDate
+        // Add a data point for each transaction to capture all balance changes
+        var lastFundBalance = startingFundBalance
+        var lastLoanBalance = startingLoanBalance
+        
+        for transaction in transactions {
+            if let transactionDate = transaction.transactionDate {
+                // Add the data point at the exact transaction time
+                fundDataPoints.append((date: transactionDate, value: transaction.balance))
+                loanDataPoints.append((date: transactionDate, value: transaction.loanBalance))
+                
+                lastFundBalance = transaction.balance
+                lastLoanBalance = transaction.loanBalance
+            }
         }
         
-        // Add final point with the most recent balance
-        if let lastTransaction = transactions.last {
-            fundDataPoints.append((date: endDate, value: lastTransaction.balance))
-            loanDataPoints.append((date: endDate, value: lastTransaction.loanBalance ?? 0))
+        // If we don't have enough data points, add intermediate points
+        if fundDataPoints.count < 10 {
+            var currentDate = startDate
+            while currentDate <= endDate {
+                // Find the last transaction up to this date
+                let lastTransaction = transactions
+                    .filter { ($0.transactionDate ?? Date.distantPast) <= currentDate }
+                    .last
+                
+                let fundBalance = lastTransaction?.balance ?? lastFundBalance
+                let loanBalance = lastTransaction?.loanBalance ?? lastLoanBalance
+                
+                // Only add if we don't already have a point at this date
+                let hasPoint = fundDataPoints.contains { abs($0.date.timeIntervalSince(currentDate)) < 60 }
+                if !hasPoint {
+                    fundDataPoints.append((date: currentDate, value: fundBalance))
+                    loanDataPoints.append((date: currentDate, value: loanBalance))
+                }
+                
+                currentDate = calendar.date(byAdding: interval, value: 1, to: currentDate) ?? endDate
+            }
         }
+        
+        // Add final point with current balance
+        fundDataPoints.append((date: endDate, value: lastFundBalance))
+        loanDataPoints.append((date: endDate, value: lastLoanBalance))
+        
+        // Sort by date to ensure proper chart rendering
+        fundDataPoints.sort { $0.date < $1.date }
+        loanDataPoints.sort { $0.date < $1.date }
         
         print("   - Generated \(fundDataPoints.count) fund balance data points")
         print("   - Generated \(loanDataPoints.count) loan balance data points")
