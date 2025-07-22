@@ -20,15 +20,22 @@ class FundCalculator {
     // MARK: - Fund Balance Calculations
     
     func calculateFundBalance(settings: FundSettings? = nil) -> Double {
+        // Get the balance from the most recent transaction
+        let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        request.fetchLimit = 1
+        
+        do {
+            if let lastTransaction = try context.fetch(request).first {
+                return lastTransaction.balance
+            }
+        } catch {
+            print("Error fetching last transaction: \(error)")
+        }
+        
+        // Fallback to Bob's initial investment if no transactions exist
         let fundSettings = settings ?? FundSettings.fetchOrCreate(in: context)
-        
-        let totalContributions = calculateTotalContributions()
-        let totalActiveLoans = calculateTotalActiveLoans()
-        let totalWithdrawn = calculateTotalWithdrawn()
-        let bobInvestment = fundSettings.bobRemainingInvestment
-        let totalInterest = fundSettings.totalInterestApplied
-        
-        return totalContributions + bobInvestment + totalInterest - totalActiveLoans - totalWithdrawn
+        return fundSettings.bobInitialInvestment
     }
     
     func calculateTotalContributions() -> Double {
@@ -53,25 +60,20 @@ class FundCalculator {
     }
     
     func calculateTotalActiveLoans() -> Double {
-        let request = NSFetchRequest<NSDictionary>(entityName: "Loan")
-        request.predicate = NSPredicate(format: "status == %@", LoanStatus.active.rawValue)
-        request.resultType = .dictionaryResultType
-        
-        let sumExpression = NSExpression(forKeyPath: "balance")
-        let sumDescription = NSExpressionDescription()
-        sumDescription.name = "sum"
-        sumDescription.expression = NSExpression(forFunction: "sum:", arguments: [sumExpression])
-        sumDescription.expressionResultType = .doubleAttributeType
-        
-        request.propertiesToFetch = [sumDescription]
+        // Get the loan balance from the most recent transaction
+        let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        request.fetchLimit = 1
         
         do {
-            let results = try context.fetch(request)
-            return (results.first?["sum"] as? Double) ?? 0
+            if let lastTransaction = try context.fetch(request).first {
+                return lastTransaction.loanBalance
+            }
         } catch {
-            print("Error calculating total active loans: \(error)")
-            return 0
+            print("Error fetching last transaction for loan balance: \(error)")
         }
+        
+        return 0
     }
     
     func calculateTotalWithdrawn() -> Double {
