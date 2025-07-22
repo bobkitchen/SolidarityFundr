@@ -65,6 +65,10 @@
         <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="balance" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="loanBalance" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="previousBalance" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="reconciled" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="reconciledDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="transactionDescription" optional="YES" attributeType="String"/>
         <attribute name="transactionDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="transactionID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>

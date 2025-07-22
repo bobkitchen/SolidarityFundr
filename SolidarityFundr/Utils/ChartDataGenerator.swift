@@ -39,156 +39,63 @@ class ChartDataGenerator {
             interval = .day
         }
         
-        // Fetch ALL transactions to properly calculate historical balances
-        let allTransactionsRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        allTransactionsRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
-        let allTransactions = (try? context.fetch(allTransactionsRequest)) ?? []
+        // Fetch transactions within the date range
+        let transactionRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        transactionRequest.predicate = NSPredicate(format: "transactionDate >= %@ AND transactionDate <= %@", startDate as NSDate, endDate as NSDate)
+        transactionRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
+        let transactions = (try? context.fetch(transactionRequest)) ?? []
         
-        // Get initial fund settings
-        let fundSettings = FundSettings.fetchOrCreate(in: context)
-        let initialBobInvestment = fundSettings.bobInitialInvestment
+        // Get the last transaction before the period for starting balance
+        let beforePeriodRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        beforePeriodRequest.predicate = NSPredicate(format: "transactionDate < %@", startDate as NSDate)
+        beforePeriodRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        beforePeriodRequest.fetchLimit = 1
+        let lastTransactionBefore = try? context.fetch(beforePeriodRequest).first
         
-        // Debug logging
+        let startingFundBalance = lastTransactionBefore?.balance ?? (FundSettings.fetchOrCreate(in: context).bobInitialInvestment)
+        let startingLoanBalance = lastTransactionBefore?.loanBalance ?? 0
+        
         print("📊 Chart Data Generator - Period: \(period)")
-        print("   - Total Transactions: \(allTransactions.count)")
-        print("   - Date Range: \(startDate) to \(endDate)")
-        print("   - Initial Bob Investment: \(initialBobInvestment)")
+        print("   - Transactions in period: \(transactions.count)")
+        print("   - Starting Fund Balance: \(startingFundBalance)")
+        print("   - Starting Loan Balance: \(startingLoanBalance)")
         
-        // Generate data points using forward calculation
-        var dataPoints: [(date: Date, value: Double)] = []
+        // Generate data points
+        var fundDataPoints: [(date: Date, value: Double)] = []
+        var loanDataPoints: [(date: Date, value: Double)] = []
         var currentDate = startDate
         
+        // Add starting point
+        fundDataPoints.append((date: startDate, value: startingFundBalance))
+        loanDataPoints.append((date: startDate, value: startingLoanBalance))
+        
         while currentDate <= endDate {
-            // Calculate fund balance at this point in time
-            var balanceAtDate = initialBobInvestment // Start with Bob's initial investment
+            // Find the last transaction up to this date
+            let lastTransaction = transactions
+                .filter { ($0.transactionDate ?? Date.distantPast) <= currentDate }
+                .last
             
-            // Add up all transactions up to this date
-            for transaction in allTransactions {
-                guard let transDate = transaction.transactionDate, transDate <= currentDate else { continue }
-                
-                // Apply transaction based on its impact on the fund
-                let fundImpact = getFundImpact(for: transaction)
-                balanceAtDate += fundImpact
-                
-                // Debug first few transactions
-                if allTransactions.firstIndex(of: transaction) ?? 0 < 5 {
-                    print("   Transaction: \(transaction.transactionType.displayName) - Amount: \(transaction.amount) - Fund Impact: \(fundImpact) - Running Balance: \(balanceAtDate)")
-                }
-            }
+            let fundBalance = lastTransaction?.balance ?? startingFundBalance
+            let loanBalance = lastTransaction?.loanBalance ?? startingLoanBalance
             
-            dataPoints.append((date: currentDate, value: max(0, balanceAtDate)))
+            fundDataPoints.append((date: currentDate, value: fundBalance))
+            loanDataPoints.append((date: currentDate, value: loanBalance))
+            
             currentDate = calendar.date(byAdding: interval, value: 1, to: currentDate) ?? endDate
         }
         
-        // Add final point with current balance if needed
-        if let lastPoint = dataPoints.last, lastPoint.date < endDate {
-            // Calculate current actual balance
-            var currentBalance = initialBobInvestment
-            for transaction in allTransactions {
-                currentBalance += getFundImpact(for: transaction)
-            }
-            dataPoints.append((date: endDate, value: max(0, currentBalance)))
+        // Add final point with the most recent balance
+        if let lastTransaction = transactions.last {
+            fundDataPoints.append((date: endDate, value: lastTransaction.balance))
+            loanDataPoints.append((date: endDate, value: lastTransaction.loanBalance ?? 0))
         }
         
-        print("   - Generated \(dataPoints.count) fund balance data points")
+        print("   - Generated \(fundDataPoints.count) fund balance data points")
+        print("   - Generated \(loanDataPoints.count) loan balance data points")
         
-        // Now generate loan balance data for the same period
-        let loanDataPoints = generateLoanBalanceData(for: period, startDate: startDate, endDate: endDate, interval: interval, context: context)
-        
-        return (fundBalance: dataPoints, loanBalance: loanDataPoints)
+        return (fundBalance: fundDataPoints, loanBalance: loanDataPoints)
     }
     
-    // Helper method to calculate how a transaction affects the fund balance
-    private func getFundImpact(for transaction: Transaction) -> Double {
-        switch transaction.transactionType {
-        case .contribution:
-            return transaction.amount  // Contributions increase fund
-        case .loanDisbursement:
-            return -abs(transaction.amount)  // Loans decrease fund (money goes out)
-        case .loanRepayment:
-            return abs(transaction.amount)  // Repayments increase fund (money comes back)
-        case .interestApplied:
-            return transaction.amount  // Interest increases fund
-        case .cashOut:
-            return -abs(transaction.amount)  // Cash outs decrease fund
-        case .bobInvestment:
-            return transaction.amount  // Bob's additional investments increase fund
-        case .bobWithdrawal:
-            return -abs(transaction.amount)  // Bob's withdrawals decrease fund
-        }
-    }
-    
-    private func generateLoanBalanceData(for period: String, startDate: Date, endDate: Date, interval: Calendar.Component, context: NSManagedObjectContext) -> [(date: Date, value: Double)] {
-        let calendar = Calendar.current
-        
-        // Fetch all loan-related transactions
-        let loanTransactionRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        loanTransactionRequest.predicate = NSPredicate(format: "type == %@ OR type == %@", 
-                                                      TransactionType.loanDisbursement.rawValue,
-                                                      TransactionType.loanRepayment.rawValue)
-        loanTransactionRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
-        let loanTransactions = (try? context.fetch(loanTransactionRequest)) ?? []
-        
-        print("📊 Loan Balance Data - Period: \(period)")
-        print("   - Total Loan Transactions: \(loanTransactions.count)")
-        
-        var dataPoints: [(date: Date, value: Double)] = []
-        var currentDate = startDate
-        
-        while currentDate <= endDate {
-            var totalOutstanding = 0.0
-            
-            // Calculate total outstanding loans at this point in time
-            for transaction in loanTransactions {
-                guard let transDate = transaction.transactionDate, transDate <= currentDate else { continue }
-                
-                switch transaction.transactionType {
-                case .loanDisbursement:
-                    // Loan disbursements increase outstanding balance
-                    totalOutstanding += abs(transaction.amount)
-                    if loanTransactions.firstIndex(of: transaction) ?? 0 < 5 {
-                        print("   Loan Disbursement: +\(abs(transaction.amount)) on \(transDate)")
-                    }
-                case .loanRepayment:
-                    // Loan repayments decrease outstanding balance
-                    totalOutstanding -= abs(transaction.amount)
-                    if loanTransactions.firstIndex(of: transaction) ?? 0 < 5 {
-                        print("   Loan Repayment: -\(abs(transaction.amount)) on \(transDate)")
-                    }
-                default:
-                    break
-                }
-            }
-            
-            // Ensure we don't have negative outstanding loans
-            totalOutstanding = max(0, totalOutstanding)
-            
-            dataPoints.append((date: currentDate, value: totalOutstanding))
-            currentDate = calendar.date(byAdding: interval, value: 1, to: currentDate) ?? endDate
-        }
-        
-        // Add final point with current balance if needed
-        if let lastPoint = dataPoints.last, lastPoint.date < endDate {
-            // Calculate current outstanding from all loan transactions
-            var currentOutstanding = 0.0
-            for transaction in loanTransactions {
-                switch transaction.transactionType {
-                case .loanDisbursement:
-                    currentOutstanding += abs(transaction.amount)
-                case .loanRepayment:
-                    currentOutstanding -= abs(transaction.amount)
-                default:
-                    break
-                }
-            }
-            dataPoints.append((date: endDate, value: max(0, currentOutstanding)))
-        }
-        
-        print("   - Generated \(dataPoints.count) loan balance data points")
-        print("   - Final outstanding: \(dataPoints.last?.value ?? 0)")
-        
-        return dataPoints
-    }
     
     // MARK: - Fund Growth Trend Data
     

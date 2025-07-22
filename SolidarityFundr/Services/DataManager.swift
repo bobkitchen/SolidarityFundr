@@ -354,6 +354,16 @@ class DataManager: ObservableObject {
     
     @discardableResult
     private func createTransaction(for member: Member?, amount: Double, type: TransactionType, description: String? = nil) -> Transaction {
+        // Get the previous balance from the most recent transaction
+        let previousBalanceRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        previousBalanceRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        previousBalanceRequest.fetchLimit = 1
+        
+        let lastTransaction = try? context.fetch(previousBalanceRequest).first
+        let previousFundBalance = lastTransaction?.balance ?? (fundSettings?.bobInitialInvestment ?? 100000)
+        let previousLoanBalance = lastTransaction?.loanBalance ?? 0
+        
+        // Create the new transaction
         let transaction = Transaction(context: context)
         transaction.transactionID = UUID()
         transaction.member = member
@@ -361,15 +371,113 @@ class DataManager: ObservableObject {
         transaction.transactionType = type
         transaction.transactionDate = Date()
         transaction.transactionDescription = description
+        transaction.previousBalance = previousFundBalance
         
-        // Calculate the new fund balance after this transaction
-        let currentBalance = fundSettings?.calculateFundBalance() ?? 0
-        transaction.balance = currentBalance
+        // Calculate the impact on fund balance
+        var fundBalanceChange: Double = 0
+        var loanBalanceChange: Double = 0
+        
+        switch type {
+        case .contribution:
+            fundBalanceChange = amount  // Increases fund
+        case .loanDisbursement:
+            fundBalanceChange = -abs(amount)  // Decreases fund
+            loanBalanceChange = abs(amount)   // Increases loans
+        case .loanRepayment:
+            fundBalanceChange = abs(amount)   // Increases fund
+            loanBalanceChange = -abs(amount)  // Decreases loans
+        case .interestApplied:
+            fundBalanceChange = amount  // Increases fund
+        case .cashOut:
+            fundBalanceChange = -abs(amount)  // Decreases fund
+        case .bobInvestment:
+            fundBalanceChange = amount  // Increases fund
+        case .bobWithdrawal:
+            fundBalanceChange = -abs(amount)  // Decreases fund
+        }
+        
+        // Set the new balances
+        transaction.balance = previousFundBalance + fundBalanceChange
+        transaction.loanBalance = previousLoanBalance + loanBalanceChange
         
         transaction.createdAt = Date()
         transaction.updatedAt = Date()
         
+        print("📝 Transaction created: \(type.displayName) - Amount: \(amount)")
+        print("   Previous Fund Balance: \(previousFundBalance) -> New: \(transaction.balance)")
+        print("   Previous Loan Balance: \(previousLoanBalance) -> New: \(transaction.loanBalance)")
+        
         return transaction
+    }
+    
+    // MARK: - Transaction Reconciliation
+    
+    func reconcileAllTransactions() {
+        print("🔄 Starting transaction reconciliation...")
+        
+        // Fetch all transactions ordered by date
+        let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
+        
+        do {
+            let allTransactions = try context.fetch(request)
+            print("   Found \(allTransactions.count) transactions to reconcile")
+            
+            // Start with initial balances
+            var runningFundBalance = fundSettings?.bobInitialInvestment ?? 100000
+            var runningLoanBalance: Double = 0
+            
+            for (index, transaction) in allTransactions.enumerated() {
+                // Store previous balance
+                transaction.previousBalance = index > 0 ? allTransactions[index - 1].balance : fundSettings?.bobInitialInvestment ?? 100000
+                
+                // Calculate balance changes based on transaction type
+                switch transaction.transactionType {
+                case .contribution:
+                    runningFundBalance += transaction.amount
+                case .loanDisbursement:
+                    runningFundBalance -= abs(transaction.amount)
+                    runningLoanBalance += abs(transaction.amount)
+                case .loanRepayment:
+                    runningFundBalance += abs(transaction.amount)
+                    runningLoanBalance -= abs(transaction.amount)
+                case .interestApplied:
+                    runningFundBalance += transaction.amount
+                case .cashOut:
+                    runningFundBalance -= abs(transaction.amount)
+                case .bobInvestment:
+                    runningFundBalance += transaction.amount
+                case .bobWithdrawal:
+                    runningFundBalance -= abs(transaction.amount)
+                }
+                
+                // Update transaction with correct balances
+                transaction.balance = runningFundBalance
+                transaction.loanBalance = runningLoanBalance
+                transaction.reconciled = true
+                transaction.reconciledDate = Date()
+                
+                print("   [\(index + 1)/\(allTransactions.count)] \(transaction.transactionType.displayName): \(transaction.amount)")
+                print("      Fund: \(transaction.previousBalance ?? 0) -> \(transaction.balance)")
+                print("      Loans: \(transaction.loanBalance)")
+            }
+            
+            saveContext()
+            print("✅ Reconciliation complete!")
+            print("   Final Fund Balance: \(runningFundBalance)")
+            print("   Final Loan Balance: \(runningLoanBalance)")
+            
+            // Verify against calculated balance
+            let calculatedBalance = fundSettings?.calculateFundBalance() ?? 0
+            print("   Calculated Fund Balance: \(calculatedBalance)")
+            
+            if abs(runningFundBalance - calculatedBalance) > 0.01 {
+                print("⚠️ WARNING: Reconciled balance doesn't match calculated balance!")
+            }
+            
+        } catch {
+            print("❌ Error reconciling transactions: \(error)")
+        }
     }
     
     // MARK: - Fund Operations

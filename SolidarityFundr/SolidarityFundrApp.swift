@@ -22,6 +22,10 @@ struct SolidarityFundrApp: App {
                         .environment(\.managedObjectContext, persistenceController.container.viewContext)
                         .environmentObject(dataManager)
                         .environmentObject(authManager)
+                        .onAppear {
+                            // Run reconciliation on app startup
+                            dataManager.reconcileAllTransactions()
+                        }
                 } else {
                     AuthenticationView()
                         .environmentObject(authManager)
