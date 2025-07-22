@@ -118,12 +118,27 @@ struct ReportsView: View {
                 Button {
                     generatePDF()
                 } label: {
-                    if isGeneratingPDF {
-                        ProgressView()
-                    } else {
-                        Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
+                    HStack(spacing: 6) {
+                        if isGeneratingPDF {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 14))
+                            Text("Open in Preview")
+                                .font(.system(size: 13, weight: .medium))
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                    )
                 }
+                .buttonStyle(.plain)
                 .disabled(isGeneratingPDF)
             }
             
@@ -138,41 +153,48 @@ struct ReportsView: View {
     
     private var reportTypeSelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 ForEach(ReportType.allCases, id: \.self) { type in
-                    Button {
-                        selectedReportType = type
-                    } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: type.icon)
-                                .font(.title2)
-                            Text(type.rawValue)
-                                .font(.caption)
-                        }
-                        .frame(width: 80)
-                        .padding(.vertical, 12)
-                        .background(selectedReportType == type ? Color.accentColor : Color.secondary.opacity(0.2))
-                        .foregroundColor(selectedReportType == type ? .white : .primary)
-                        .cornerRadius(10)
-                    }
+                    ReportTypeButton(
+                        reportType: type,
+                        isSelected: selectedReportType == type,
+                        action: { selectedReportType = type }
+                    )
                 }
             }
-            .padding()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
     }
     
     private var dateRangeSelector: some View {
-        HStack {
-            DatePicker("From", selection: $startDate, displayedComponents: .date)
-                .datePickerStyle(.compact)
+        HStack(spacing: 16) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                
+                DatePicker("From", selection: $startDate, displayedComponents: .date)
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+                
+                Text("–")
+                    .foregroundColor(.secondary)
+                
+                DatePicker("To", selection: $endDate, displayedComponents: .date)
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .cornerRadius(8)
             
             Spacer()
-            
-            DatePicker("To", selection: $endDate, displayedComponents: .date)
-                .datePickerStyle(.compact)
         }
-        .padding(.horizontal)
-        .padding(.bottom)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
     }
     
     // MARK: - PDF Generation
@@ -688,25 +710,10 @@ struct ContributionAnalysisCard: View {
     @EnvironmentObject var dataManager: DataManager
     
     var monthlyTotals: [(month: String, amount: Double)] {
-        // Simple aggregation of contributions by month
-        let calendar = Calendar.current
-        var totals: [String: Double] = [:]
-        
-        for member in dataManager.members {
-            if let payments = member.payments?.allObjects as? [Payment] {
-                for payment in payments {
-                    if let date = payment.paymentDate, payment.contributionAmount > 0 {
-                        let components = calendar.dateComponents([.year, .month], from: date)
-                        let key = "\(components.year ?? 0)-\(String(format: "%02d", components.month ?? 0))"
-                        totals[key, default: 0] += payment.contributionAmount
-                    }
-                }
-            }
-        }
-        
-        return totals.map { (month: $0.key, amount: $0.value) }
-            .sorted { $0.month < $1.month }
-            .suffix(6)
+        return ChartDataGenerator.shared.generateMonthlyContributionData(
+            months: 6,
+            context: PersistenceController.shared.container.viewContext
+        )
     }
     
     var body: some View {
@@ -852,22 +859,10 @@ struct FundGrowthChart: View {
     @EnvironmentObject var dataManager: DataManager
     
     var fundGrowthData: [(month: String, balance: Double)] {
-        // Calculate fund balance over last 6 months
-        let calendar = Calendar.current
-        var data: [(month: String, balance: Double)] = []
-        
-        for i in 0..<6 {
-            let date = calendar.date(byAdding: .month, value: -i, to: Date()) ?? Date()
-            let monthKey = DateFormatter().monthSymbols[calendar.component(.month, from: date) - 1].prefix(3)
-            
-            // Simple calculation - this could be more sophisticated
-            let fundSummary = FundCalculator.shared.generateFundSummary()
-            let balance = fundSummary.fundBalance * (1.0 - Double(i) * 0.05) // Simulate growth
-            
-            data.append((month: String(monthKey), balance: max(0, balance)))
-        }
-        
-        return data.reversed()
+        return ChartDataGenerator.shared.generateFundGrowthData(
+            months: 6,
+            context: PersistenceController.shared.container.viewContext
+        )
     }
     
     var body: some View {
@@ -1337,6 +1332,94 @@ struct RecentActivitySection: View {
         .padding()
         .background(Color.secondary.opacity(0.1))
         .cornerRadius(10)
+    }
+}
+
+// MARK: - Report Type Button
+
+struct ReportTypeButton: View {
+    let reportType: ReportsView.ReportType
+    let isSelected: Bool
+    let action: () -> Void
+    
+    @State private var isHovered = false
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: reportType.icon)
+                    .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(iconColor)
+                    .scaleEffect(isHovered ? 1.1 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+                
+                Text(reportType.rawValue)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(textColor)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 88, height: 66)
+            .background(backgroundView)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(
+                        isSelected ? Color.accentColor.opacity(0.3) : Color.clear,
+                        lineWidth: 1.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+    
+    private var iconColor: Color {
+        if isSelected {
+            return .accentColor
+        } else if isHovered {
+            return .primary
+        } else {
+            return .secondary
+        }
+    }
+    
+    private var textColor: Color {
+        if isSelected {
+            return .primary
+        } else if isHovered {
+            return .primary.opacity(0.9)
+        } else {
+            return .secondary
+        }
+    }
+    
+    @ViewBuilder
+    private var backgroundView: some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.accentColor.opacity(0.08))
+                )
+        } else if isHovered {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(0.03))
+                )
+        } else {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.ultraThinMaterial)
+                .opacity(0.5)
+        }
     }
 }
 

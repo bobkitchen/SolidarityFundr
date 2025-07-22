@@ -361,7 +361,11 @@ class DataManager: ObservableObject {
         transaction.transactionType = type
         transaction.transactionDate = Date()
         transaction.transactionDescription = description
-        transaction.balance = fundSettings?.calculateFundBalance() ?? 0
+        
+        // Calculate the new fund balance after this transaction
+        let currentBalance = fundSettings?.calculateFundBalance() ?? 0
+        transaction.balance = currentBalance
+        
         transaction.createdAt = Date()
         transaction.updatedAt = Date()
         

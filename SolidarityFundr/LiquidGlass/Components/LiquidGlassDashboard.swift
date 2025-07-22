@@ -255,90 +255,26 @@ struct MiniChart: View {
 // MARK: - Activity Chart Card
 struct ActivityChartCard: View {
     @State private var selectedPeriod = "Week"
+    @State private var hoveredDate: Date?
+    @State private var cursorPosition: CGPoint = .zero
+    @State private var isHovering = false
     @EnvironmentObject var dataManager: DataManager
     let periods = ["Day", "Week", "Month", "Year"]
     
-    // Use recent transaction data to show fund balance trends
-    private var chartData: [(date: Date, value: Double)] {
-        let calendar = Calendar.current
-        let today = Date()
-        let fundBalance = dataManager.fundSettings?.calculateFundBalance() ?? 0
-        
-        // Use recent transactions to show balance trend
-        let transactions = dataManager.recentTransactions.sorted { $0.transactionDate ?? Date() < $1.transactionDate ?? Date() }
-        
-        // Generate data points based on time period
-        var dataPoints: [(date: Date, value: Double)] = []
-        
-        switch selectedPeriod {
-        case "Day":
-            // Show hourly data for the last 24 hours
-            for hour in 0..<24 {
-                let targetDate = calendar.date(byAdding: .hour, value: -hour, to: today)!
-                // Calculate approximate balance change based on recent transactions
-                var balanceChange: Double = 0
-                for transaction in transactions {
-                    if let transDate = transaction.transactionDate, 
-                       transDate > targetDate && transDate <= today {
-                        if transaction.transactionType.isCredit {
-                            balanceChange += transaction.amount
-                        } else {
-                            balanceChange -= transaction.amount
-                        }
-                    }
-                }
-                dataPoints.append((targetDate, max(0, fundBalance - balanceChange)))
-            }
-        case "Week":
-            // Show daily data for the last 7 days
-            for day in 0..<7 {
-                let targetDate = calendar.date(byAdding: .day, value: -day, to: today)!
-                var balanceChange: Double = 0
-                for transaction in transactions {
-                    if let transDate = transaction.transactionDate, 
-                       transDate > targetDate && transDate <= today {
-                        if transaction.transactionType.isCredit {
-                            balanceChange += transaction.amount
-                        } else {
-                            balanceChange -= transaction.amount
-                        }
-                    }
-                }
-                dataPoints.append((targetDate, max(0, fundBalance - balanceChange)))
-            }
-        case "Month":
-            // Show data points for the last 30 days
-            for day in stride(from: 0, to: 30, by: 3) {
-                let targetDate = calendar.date(byAdding: .day, value: -day, to: today)!
-                var balanceChange: Double = 0
-                for transaction in transactions {
-                    if let transDate = transaction.transactionDate, 
-                       transDate > targetDate && transDate <= today {
-                        if transaction.transactionType.isCredit {
-                            balanceChange += transaction.amount
-                        } else {
-                            balanceChange -= transaction.amount
-                        }
-                    }
-                }
-                dataPoints.append((targetDate, max(0, fundBalance - balanceChange)))
-            }
-        case "Year":
-            // Show monthly data for the last 12 months
-            // Since we only have recent transactions, show a simple trend
-            let monthlyAverage = fundBalance / 12
-            for month in 0..<12 {
-                let targetDate = calendar.date(byAdding: .month, value: -month, to: today)!
-                let variance = Double.random(in: -0.1...0.1) // Small variance for visualization
-                let value = fundBalance - (Double(month) * monthlyAverage * 0.05) + (monthlyAverage * variance)
-                dataPoints.append((targetDate, max(0, value)))
-            }
-        default:
-            // Default to current balance
-            dataPoints.append((today, fundBalance))
-        }
-        
-        return dataPoints.reversed()
+    // Use actual transaction data to show fund balance trends
+    private var chartData: (fundBalance: [(date: Date, value: Double)], loanBalance: [(date: Date, value: Double)]) {
+        return ChartDataGenerator.shared.generateFundActivityData(
+            for: selectedPeriod,
+            context: PersistenceController.shared.container.viewContext
+        )
+    }
+    
+    // Get values at specific date
+    private func getValuesAt(date: Date) -> (fund: Double?, loan: Double?) {
+        // Find the closest data points
+        let fundValue = chartData.fundBalance.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })?.value
+        let loanValue = chartData.loanBalance.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })?.value
+        return (fundValue, loanValue)
     }
     
     var body: some View {
@@ -359,32 +295,63 @@ struct ActivityChartCard: View {
             }
             
             // Actual Chart with proper clipping
-            if !chartData.isEmpty {
-                let minValue = chartData.map { $0.value }.min() ?? 0
-                let maxValue = chartData.map { $0.value }.max() ?? 100000
-                let padding = (maxValue - minValue) * 0.1
+            if !chartData.fundBalance.isEmpty {
+                let allValues = chartData.fundBalance.map { $0.value } + chartData.loanBalance.map { $0.value }
+                let minValue = allValues.min() ?? 0
+                let maxValue = allValues.max() ?? 100000
+                let hasVariation = (maxValue - minValue) > 100 // Check if there's meaningful variation
+                let padding = hasVariation ? (maxValue - minValue) * 0.1 : maxValue * 0.1
                 
-                Chart(chartData, id: \.date) { item in
-                    LineMark(
-                        x: .value("Date", item.date),
-                        y: .value("Balance", item.value)
-                    )
-                    .foregroundStyle(.blue.gradient)
-                    .interpolationMethod(.catmullRom)
+                Chart {
+                    // Fund Balance Line
+                    ForEach(chartData.fundBalance, id: \.date) { item in
+                        LineMark(
+                            x: .value("Date", item.date),
+                            y: .value("Balance", item.value),
+                            series: .value("Type", "Fund Balance")
+                        )
+                        .foregroundStyle(.blue.gradient)
+                        .interpolationMethod(.catmullRom)
+                        .symbol(Circle().strokeBorder(lineWidth: 2))
+                        .symbolSize(0) // Hide symbols for cleaner look
+                    }
                     
-                    AreaMark(
-                        x: .value("Date", item.date),
-                        y: .value("Balance", item.value)
-                    )
-                    .foregroundStyle(.linearGradient(
-                        colors: [.blue.opacity(0.3), .blue.opacity(0.1)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
-                    .interpolationMethod(.catmullRom)
+                    // Fund Balance Area
+                    ForEach(chartData.fundBalance, id: \.date) { item in
+                        AreaMark(
+                            x: .value("Date", item.date),
+                            y: .value("Balance", item.value),
+                            series: .value("Type", "Fund Balance")
+                        )
+                        .foregroundStyle(.linearGradient(
+                            colors: [.blue.opacity(0.2), .blue.opacity(0.05)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ))
+                        .interpolationMethod(.catmullRom)
+                    }
+                    
+                    // Outstanding Loans Line
+                    ForEach(chartData.loanBalance, id: \.date) { item in
+                        LineMark(
+                            x: .value("Date", item.date),
+                            y: .value("Balance", item.value),
+                            series: .value("Type", "Outstanding Loans")
+                        )
+                        .foregroundStyle(.orange.gradient)
+                        .interpolationMethod(.catmullRom)
+                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+                    }
+                    
+                    // Cursor line when hovering
+                    if let hoveredDate = hoveredDate {
+                        RuleMark(x: .value("Date", hoveredDate))
+                            .foregroundStyle(.gray.opacity(0.3))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
+                    }
                 }
                 .frame(height: 200)
-                .chartYScale(domain: (minValue - padding)...(maxValue + padding))
+                .chartYScale(domain: hasVariation ? (minValue - padding)...(maxValue + padding) : 0...(maxValue + padding))
                 .chartXAxis {
                     AxisMarks(preset: .aligned) { _ in
                         AxisGridLine()
@@ -407,7 +374,65 @@ struct ActivityChartCard: View {
                         }
                     }
                 }
+                .chartLegend(position: .bottom, alignment: .leading, spacing: 16)
+                .chartForegroundStyleScale([
+                    "Fund Balance": .blue,
+                    "Outstanding Loans": .orange
+                ])
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let location):
+                                    let plotFrame = geometry[proxy.plotAreaFrame]
+                                    let xPosition = location.x - plotFrame.origin.x
+                                    
+                                    // Convert x position to date
+                                    if let date: Date = proxy.value(atX: xPosition) {
+                                        hoveredDate = date
+                                        cursorPosition = location
+                                        isHovering = true
+                                    }
+                                case .ended:
+                                    hoveredDate = nil
+                                    isHovering = false
+                                }
+                            }
+                    }
+                }
                 .clipped() // Prevent chart from bleeding outside bounds
+                .overlay(alignment: .topTrailing) {
+                    if !hasVariation && selectedPeriod != "Day" {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Image(systemName: "info.circle")
+                                .font(.caption)
+                            Text("Limited activity in this period")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(6)
+                        .padding(8)
+                    }
+                }
+                .overlay {
+                    // Tooltip/Popover for hover values
+                    if isHovering, let hoveredDate = hoveredDate {
+                        let values = getValuesAt(date: hoveredDate)
+                        
+                        ChartTooltipView(
+                            date: hoveredDate,
+                            fundBalance: values.fund,
+                            loanBalance: values.loan,
+                            period: selectedPeriod
+                        )
+                        .position(x: cursorPosition.x, y: max(40, cursorPosition.y - 40))
+                    }
+                }
             } else {
                 // Empty state
                 RoundedRectangle(cornerRadius: 12)
@@ -609,6 +634,77 @@ struct LiquidGlassQuickActionButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
+    }
+}
+
+// MARK: - Chart Tooltip View
+struct ChartTooltipView: View {
+    let date: Date
+    let fundBalance: Double?
+    let loanBalance: Double?
+    let period: String
+    
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        switch period {
+        case "Day":
+            formatter.dateFormat = "MMM d, h:mm a"
+        case "Week", "Month":
+            formatter.dateFormat = "MMM d, yyyy"
+        case "Year":
+            formatter.dateFormat = "MMM yyyy"
+        default:
+            formatter.dateFormat = "MMM d, yyyy"
+        }
+        return formatter
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(dateFormatter.string(from: date))
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                if let fundBalance = fundBalance {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(.blue)
+                            .frame(width: 8, height: 8)
+                        Text("Fund Balance:")
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                        Text(CurrencyFormatter.shared.format(fundBalance))
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.primary)
+                    }
+                }
+                
+                if let loanBalance = loanBalance {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 8, height: 8)
+                        Text("Outstanding Loans:")
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                        Text(CurrencyFormatter.shared.format(loanBalance))
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(.quaternary, lineWidth: 0.5)
+        )
     }
 }
 
