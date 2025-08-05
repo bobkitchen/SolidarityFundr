@@ -198,6 +198,9 @@ class PaymentViewModel: ObservableObject {
                 notes: paymentNotes.isEmpty ? nil : paymentNotes
             )
             
+            // Recalculate all transaction balances to ensure fund balance is correct
+            dataManager.recalculateAllTransactionBalances()
+            
             clearNewPaymentForm()
             showingNewPayment = false
             selectedPayment = payment
@@ -454,6 +457,12 @@ class PaymentViewModel: ObservableObject {
                 dataManager.recalculateLoanBalance(selectedLoan!)
             }
             
+            // Always recalculate member contributions when updating a payment
+            dataManager.recalculateMemberContributions(member)
+            
+            // Recalculate all transaction balances to ensure fund balance is correct
+            dataManager.recalculateAllTransactionBalances()
+            
             // Clear form and reload
             clearNewPaymentForm()
             isEditMode = false
@@ -473,9 +482,11 @@ class PaymentViewModel: ObservableObject {
     
     func deletePayment(_ payment: Payment) {
         do {
-            // Store loan reference before deletion
+            // Store references before deletion
             let affectedLoan = payment.loan
             let wasLoanPayment = payment.paymentType == .loanRepayment
+            let wasContribution = payment.paymentType == .contribution
+            let member = payment.member
             
             // Delete associated transaction if exists
             if let transaction = payment.transaction {
@@ -492,6 +503,14 @@ class PaymentViewModel: ObservableObject {
             if wasLoanPayment && affectedLoan != nil {
                 dataManager.recalculateLoanBalance(affectedLoan!)
             }
+            
+            // Recalculate member contributions if this was a contribution payment
+            if wasContribution && member != nil {
+                dataManager.recalculateMemberContributions(member!)
+            }
+            
+            // Always recalculate all transaction balances after deleting a payment
+            dataManager.recalculateAllTransactionBalances()
             
             // Reload payments
             loadPayments()

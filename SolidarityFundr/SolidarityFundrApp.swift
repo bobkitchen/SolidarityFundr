@@ -6,9 +6,15 @@
 //
 
 import SwiftUI
+import AppIntents
 
 @main
 struct SolidarityFundrApp: App {
+    
+    init() {
+        // Register App Shortcuts
+        SolidarityFundShortcuts.updateAppShortcutParameters()
+    }
     let persistenceController = PersistenceController.shared
     @StateObject private var dataManager = DataManager.shared
     @StateObject private var authManager = AuthenticationManager.shared
@@ -25,6 +31,16 @@ struct SolidarityFundrApp: App {
                         .onAppear {
                             // Run reconciliation on app startup
                             dataManager.reconcileAllTransactions()
+                            
+                            // Start statement scheduler if enabled
+                            let fundSettings = FundSettings.fetchOrCreate(in: persistenceController.container.viewContext)
+                            if fundSettings.smsNotificationsEnabled {
+                                StatementScheduler.shared.startScheduler()
+                            }
+                        }
+                        .onDisappear {
+                            // Stop the scheduler when app closes
+                            StatementScheduler.shared.stopScheduler()
                         }
                 } else {
                     AuthenticationView()

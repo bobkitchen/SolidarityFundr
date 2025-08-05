@@ -476,6 +476,7 @@ struct ActivityChartCard: View {
 // MARK: - Recent Transactions Card
 struct RecentTransactionsCard: View {
     @EnvironmentObject var dataManager: DataManager
+    @State private var refreshID = UUID()
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -508,6 +509,15 @@ struct RecentTransactionsCard: View {
             cornerRadius: DesignSystem.cornerRadiusLarge,
             strokeOpacity: 0.1
         )
+        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+            // Force refresh when transactions are updated
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            // Force refresh when a payment is saved
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
 }
 

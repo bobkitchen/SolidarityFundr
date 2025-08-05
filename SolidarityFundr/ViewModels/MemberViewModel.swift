@@ -30,6 +30,7 @@ class MemberViewModel: ObservableObject {
     @Published var newMemberEmail = ""
     @Published var newMemberPhone = ""
     @Published var newMemberJoinDate = Date()
+    @Published var newMemberSMSOptIn = false
     
     private let dataManager = DataManager.shared
     private let businessRules = BusinessRulesEngine.shared
@@ -116,7 +117,8 @@ class MemberViewModel: ObservableObject {
             role: newMemberRole,
             email: newMemberEmail.isEmpty ? nil : newMemberEmail,
             phoneNumber: newMemberPhone.isEmpty ? nil : newMemberPhone,
-            joinDate: newMemberJoinDate
+            joinDate: newMemberJoinDate,
+            smsOptIn: newMemberSMSOptIn
         )
         
         // Reset form
@@ -221,6 +223,7 @@ class MemberViewModel: ObservableObject {
         newMemberEmail = ""
         newMemberPhone = ""
         newMemberJoinDate = Date()
+        newMemberSMSOptIn = false
         validationWarnings = []
     }
     

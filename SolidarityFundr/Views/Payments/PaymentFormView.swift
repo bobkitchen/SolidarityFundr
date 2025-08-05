@@ -72,7 +72,7 @@ struct PaymentFormView: View {
             .onAppear {
                 setupInitialState()
             }
-            .onChange(of: editingPayment) { newPayment in
+            .onChange(of: editingPayment) { _, newPayment in
                 if let payment = newPayment {
                     viewModel.loadPaymentForEditing(payment)
                 }

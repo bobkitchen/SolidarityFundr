@@ -23,6 +23,9 @@ struct ReportsView: View {
     @State private var errorMessage = ""
     @State private var refreshID = UUID()
     @State private var cancellables = Set<AnyCancellable>()
+    @State private var showingNotificationHistory = false
+    @State private var showingBatchStatement = false
+    @State private var hasRecalculated = false
     
     enum ReportType: String, CaseIterable {
         case fundOverview = "Fund Overview"
@@ -30,6 +33,7 @@ struct ReportsView: View {
         case loanSummary = "Loan Summary"
         case monthlyReport = "Monthly Report"
         case analytics = "Analytics"
+        case fundSummary = "Fund Summary Report"
         
         var icon: String {
             switch self {
@@ -38,6 +42,7 @@ struct ReportsView: View {
             case .loanSummary: return "creditcard.fill"
             case .monthlyReport: return "calendar"
             case .analytics: return "chart.xyaxis.line"
+            case .fundSummary: return "doc.text.image.fill"
             }
         }
     }
@@ -68,6 +73,8 @@ struct ReportsView: View {
                     MonthlyReport(startDate: startDate, endDate: endDate)
                 case .analytics:
                     AnalyticsReport()
+                case .fundSummary:
+                    FundSummaryReport()
                 }
             }
         }
@@ -78,8 +85,20 @@ struct ReportsView: View {
         } message: {
             Text(errorMessage)
         }
+        .sheet(isPresented: $showingNotificationHistory) {
+            NotificationHistoryView()
+        }
+        .sheet(isPresented: $showingBatchStatement) {
+            BatchStatementView()
+                .environmentObject(dataManager)
+        }
         .onAppear {
             setupNotificationListeners()
+            // Recalculate all member contributions on view load to fix any discrepancies
+            if !hasRecalculated {
+                dataManager.recalculateAllMemberContributions()
+                hasRecalculated = true
+            }
         }
         .id(refreshID)
     }
@@ -114,6 +133,46 @@ struct ReportsView: View {
                     .fontWeight(.bold)
                 
                 Spacer()
+                
+                Button {
+                    showingBatchStatement = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.on.doc.fill")
+                            .font(.system(size: 14))
+                        Text("Batch Statements")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                Button {
+                    showingNotificationHistory = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "message.fill")
+                            .font(.system(size: 14))
+                        Text("Message History")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
                 
                 Button {
                     generatePDF()
@@ -293,6 +352,17 @@ struct MemberStatementReport: View {
     @EnvironmentObject var dataManager: DataManager
     @Binding var selectedMember: Member?
     
+    @State private var pdfURL: URL?
+    @State private var isGeneratingPDF = false
+    @State private var isSendingMessage = false
+    @State private var showingSendConfirmation = false
+    @State private var showingError = false
+    @State private var errorMessage = ""
+    @State private var showingSuccess = false
+    @State private var successMessage = ""
+    @State private var statementPeriodStart = Calendar.current.date(byAdding: .month, value: -1, to: Date())!
+    @State private var statementPeriodEnd = Date()
+    
     var body: some View {
         VStack(spacing: 20) {
             // Member Selector
@@ -303,6 +373,7 @@ struct MemberStatementReport: View {
                 HStack {
                     Button {
                         selectedMember = nil
+                        pdfURL = nil
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
@@ -315,8 +386,19 @@ struct MemberStatementReport: View {
                     Spacer()
                 }
                 
-                // Member Info
+                // Member Info with SMS Status
                 MemberInfoCard(member: member)
+                
+                // Statement Actions
+                MemberStatementActions(
+                    member: member,
+                    pdfURL: $pdfURL,
+                    isGeneratingPDF: $isGeneratingPDF,
+                    isSendingMessage: $isSendingMessage,
+                    showingSendConfirmation: $showingSendConfirmation,
+                    statementPeriodStart: $statementPeriodStart,
+                    statementPeriodEnd: $statementPeriodEnd
+                )
                 
                 // Financial Summary
                 MemberFinancialSummary(member: member)
@@ -332,10 +414,268 @@ struct MemberStatementReport: View {
             }
         }
         .padding()
+        .alert("Send Statement", isPresented: $showingSendConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Send via WhatsApp") {
+                sendStatement(useWhatsApp: true)
+            }
+        } message: {
+            if let member = selectedMember {
+                Text("Send monthly statement to \(member.name ?? "member") at \(member.phoneNumber ?? "unknown") via WhatsApp?\n\nThe PDF will be sent directly as an attachment.\n\nPeriod: \(DateHelper.formatDate(statementPeriodStart)) - \(DateHelper.formatDate(statementPeriodEnd))")
+            }
+        }
+        .alert("Error", isPresented: $showingError) {
+            Button("OK") {}
+        } message: {
+            Text(errorMessage)
+        }
+        .alert("Success", isPresented: $showingSuccess) {
+            Button("OK") {}
+        } message: {
+            Text(successMessage)
+        }
+    }
+    
+    private func sendStatement(useWhatsApp: Bool = false) {
+        guard let member = selectedMember,
+              let pdfURL = pdfURL,
+              let window = NSApp.windows.first else { return }
+        
+        do {
+            let pdfData = try Data(contentsOf: pdfURL)
+            
+            // Show WhatsApp sharing picker
+            if let contentView = window.contentView {
+                WhatsAppSharingService.shared.shareStatement(
+                    pdfData: pdfData,
+                    for: member,
+                    in: contentView
+                )
+                
+                // Record the share action
+                Task {
+                    try await StatementService.shared.recordWhatsAppShare(for: member, pdfData: pdfData)
+                    
+                    await MainActor.run {
+                        successMessage = "Statement prepared for \(member.name ?? "member")"
+                        showingSuccess = true
+                    }
+                }
+            }
+        } catch {
+            errorMessage = "Failed to prepare statement: \(error.localizedDescription)"
+            showingError = true
+        }
     }
 }
 
 // MARK: - Supporting Views
+
+struct MemberStatementActions: View {
+    let member: Member
+    @Binding var pdfURL: URL?
+    @Binding var isGeneratingPDF: Bool
+    @Binding var isSendingMessage: Bool
+    @Binding var showingSendConfirmation: Bool
+    @Binding var statementPeriodStart: Date
+    @Binding var statementPeriodEnd: Date
+    @Environment(\.managedObjectContext) private var viewContext
+    @EnvironmentObject var dataManager: DataManager
+    
+    var canSendMessage: Bool {
+        // For WhatsApp, we just need a phone number and active status
+        member.phoneNumber != nil && member.memberStatus == .active
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section Header
+            HStack {
+                Label("Statement Actions", systemImage: "doc.text.fill")
+                    .font(.headline)
+                
+                Spacer()
+                
+                // Period Selector
+                HStack(spacing: 8) {
+                    DatePicker("From", selection: $statementPeriodStart, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                    
+                    Text("–")
+                        .foregroundColor(.secondary)
+                    
+                    DatePicker("To", selection: $statementPeriodEnd, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial)
+                .cornerRadius(6)
+            }
+            
+            // Action Buttons
+            HStack(spacing: 16) {
+                // Generate & Preview Button
+                Button {
+                    generateAndPreviewPDF()
+                } label: {
+                    HStack {
+                        if isGeneratingPDF {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "doc.text.magnifyingglass")
+                        }
+                        Text("Generate & Preview")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .disabled(isGeneratingPDF || isSendingMessage)
+                
+                // Send WhatsApp Button
+                Button {
+                    showingSendConfirmation = true
+                } label: {
+                    HStack {
+                        if isSendingMessage {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "message.fill")
+                        }
+                        Text("Send via WhatsApp")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(canSendMessage && pdfURL != nil ? Color.green : Color.gray)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSendMessage || pdfURL == nil || isSendingMessage)
+                .help(getSendButtonHelp())
+            }
+            
+            // Status Messages
+            if !canSendMessage {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text(getMessageDisabledReason())
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            // Recent Message History
+            if let recentNotifications = getRecentNotifications() {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Recent Statements")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    ForEach(recentNotifications.prefix(3)) { notification in
+                        HStack {
+                            Circle()
+                                .fill(notification.status == "delivered" ? Color.green : Color.orange)
+                                .frame(width: 6, height: 6)
+                            
+                            Text(DateHelper.formatDate(notification.sentDate))
+                                .font(.caption)
+                            
+                            Spacer()
+                            
+                            Text(notification.status ?? "sent")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color.secondary.opacity(0.05))
+                .cornerRadius(6)
+            }
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.1))
+        .cornerRadius(10)
+    }
+    
+    private func generateAndPreviewPDF() {
+        isGeneratingPDF = true
+        
+        Task {
+            do {
+                let pdfGenerator = PDFGenerator()
+                let url = try await pdfGenerator.generateReport(
+                    type: .memberStatement,
+                    dataManager: dataManager,
+                    member: member,
+                    startDate: statementPeriodStart,
+                    endDate: statementPeriodEnd
+                )
+                
+                await MainActor.run {
+                    self.pdfURL = url
+                    self.isGeneratingPDF = false
+                    // Open in Preview
+                    NSWorkspace.shared.open(url)
+                }
+            } catch {
+                print("PDF generation error: \(error)")
+                await MainActor.run {
+                    self.isGeneratingPDF = false
+                }
+            }
+        }
+    }
+    
+    private func getSendButtonHelp() -> String {
+        if member.phoneNumber == nil {
+            return "Member has no phone number on file"
+        } else if member.memberStatus != .active {
+            return "Member is not active"
+        } else if pdfURL == nil {
+            return "Generate PDF first before sending"
+        } else {
+            return "Send statement via WhatsApp with PDF attachment"
+        }
+    }
+    
+    private func getMessageDisabledReason() -> String {
+        if member.phoneNumber == nil {
+            return "No phone number on file"
+        } else if member.memberStatus != .active {
+            return "Member is not active"
+        } else {
+            return ""
+        }
+    }
+    
+    private func getRecentNotifications() -> [NotificationHistory]? {
+        let request: NSFetchRequest<NotificationHistory> = NotificationHistory.fetchRequest()
+        request.predicate = NSPredicate(format: "member == %@", member)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \NotificationHistory.sentDate, ascending: false)]
+        request.fetchLimit = 3
+        
+        do {
+            let notifications = try viewContext.fetch(request)
+            return notifications.isEmpty ? nil : notifications
+        } catch {
+            print("Error fetching notifications: \(error)")
+            return nil
+        }
+    }
+}
 
 struct FundBalanceCard: View {
     let fundSummary: FundSummary
@@ -521,36 +861,200 @@ struct FundCompositionChart: View {
 struct MemberSelector: View {
     @EnvironmentObject var dataManager: DataManager
     @Binding var selectedMember: Member?
+    @State private var filterOption: MemberFilterOption = .all
+    @State private var sortOption: MemberSortOption = .name
+    
+    enum MemberFilterOption: String, CaseIterable {
+        case all = "All Members"
+        case whatsAppEnabled = "WhatsApp Available"
+        case neverSent = "Never Sent"
+        case overdue = "Overdue"
+        
+        var icon: String {
+            switch self {
+            case .all: return "person.3"
+            case .whatsAppEnabled: return "message.fill"
+            case .neverSent: return "paperplane"
+            case .overdue: return "clock.badge.exclamationmark"
+            }
+        }
+    }
+    
+    enum MemberSortOption: String, CaseIterable {
+        case name = "Name"
+        case lastStatement = "Last Statement"
+        case role = "Role"
+    }
+    
+    var filteredMembers: [Member] {
+        let members = dataManager.members.filter { member in
+            switch filterOption {
+            case .all:
+                return true
+            case .whatsAppEnabled:
+                return member.phoneNumber != nil
+            case .neverSent:
+                return member.lastStatementSentDate == nil
+            case .overdue:
+                // Consider overdue if no statement sent in last 30 days
+                if let lastSent = member.lastStatementSentDate {
+                    return Date().timeIntervalSince(lastSent) > 30 * 24 * 60 * 60
+                }
+                return true
+            }
+        }
+        
+        return members.sorted { m1, m2 in
+            switch sortOption {
+            case .name:
+                return (m1.name ?? "") < (m2.name ?? "")
+            case .lastStatement:
+                let date1 = m1.lastStatementSentDate ?? Date.distantPast
+                let date2 = m2.lastStatementSentDate ?? Date.distantPast
+                return date1 > date2
+            case .role:
+                return m1.memberRole.rawValue < m2.memberRole.rawValue
+            }
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Select Member")
-                .font(.headline)
-            
-            ScrollView {
-                ForEach(dataManager.members.sorted { $0.name ?? "" < $1.name ?? "" }) { member in
-                    Button {
-                        selectedMember = member
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(member.name ?? "Unknown")
-                                    .fontWeight(.medium)
-                                Text(member.memberRole.displayName)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+            // Header with filters
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Select Member")
+                    .font(.headline)
+                
+                // Filter and Sort Controls
+                HStack {
+                    // Filter Menu
+                    Menu {
+                        ForEach(MemberFilterOption.allCases, id: \.self) { option in
+                            Button {
+                                filterOption = option
+                            } label: {
+                                Label(option.rawValue, systemImage: option.icon)
                             }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
                         }
-                        .padding()
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(8)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: filterOption.icon)
+                            Text(filterOption.rawValue)
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                        }
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(6)
                     }
-                    .buttonStyle(.plain)
+                    
+                    // Sort Menu
+                    Menu {
+                        ForEach(MemberSortOption.allCases, id: \.self) { option in
+                            Button {
+                                sortOption = option
+                            } label: {
+                                Text("Sort by \(option.rawValue)")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.arrow.down")
+                            Text(sortOption.rawValue)
+                        }
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(6)
+                    }
+                    
+                    Spacer()
+                    
+                    // Member count
+                    Text("\(filteredMembers.count) members")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Divider()
+            
+            // Member List
+            if filteredMembers.isEmpty {
+                VStack {
+                    Image(systemName: "person.slash")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text("No members match filter")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                ScrollView {
+                    ForEach(filteredMembers) { member in
+                        Button {
+                            selectedMember = member
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(member.name ?? "Unknown")
+                                            .fontWeight(.medium)
+                                        
+                                        // WhatsApp Status Icon
+                                        if member.phoneNumber != nil {
+                                            Image(systemName: "message.fill")
+                                                .font(.caption)
+                                                .foregroundColor(.green)
+                                        }
+                                    }
+                                    
+                                    HStack {
+                                        Text(member.memberRole.displayName)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        
+                                        if let lastSent = member.lastStatementSentDate {
+                                            Text("• Last sent: \(DateHelper.formatShortDate(lastSent))")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        } else {
+                                            Text("• Never sent")
+                                                .font(.caption)
+                                                .foregroundColor(.orange)
+                                        }
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                // Status Indicators
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    if member.memberStatus != .active {
+                                        Text(member.memberStatus.rawValue.capitalized)
+                                            .font(.caption)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.red.opacity(0.2))
+                                            .foregroundColor(.red)
+                                            .cornerRadius(4)
+                                    }
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.secondary)
+                                        .font(.caption)
+                                }
+                            }
+                            .padding()
+                            .background(Color.secondary.opacity(0.05))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -1034,6 +1538,38 @@ struct MemberInfoCard: View {
                 InfoItem(label: "Member Since", value: DateHelper.formatDate(member.joinDate))
                 Spacer()
                 InfoItem(label: "Phone", value: member.phoneNumber ?? "N/A")
+            }
+            
+            // WhatsApp Status Row
+            HStack(spacing: 16) {
+                HStack(spacing: 6) {
+                    Image(systemName: member.phoneNumber != nil ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(member.phoneNumber != nil ? .green : .red)
+                        .font(.caption)
+                    Text("WhatsApp \(member.phoneNumber != nil ? "Available" : "No Phone")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                if let lastStatementDate = member.lastStatementSentDate {
+                    HStack(spacing: 6) {
+                        Image(systemName: "paperplane.fill")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                        Text("Last sent: \(DateHelper.formatDate(lastStatementDate))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "paperplane")
+                            .foregroundColor(.orange)
+                            .font(.caption)
+                        Text("No statements sent")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             
             if let email = member.email {

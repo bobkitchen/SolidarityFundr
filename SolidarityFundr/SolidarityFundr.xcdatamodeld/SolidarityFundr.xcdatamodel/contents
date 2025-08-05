@@ -11,6 +11,10 @@
         <attribute name="totalInterestApplied" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="utilizationWarningThreshold" optional="YES" attributeType="Double" defaultValueString="0.6" usesScalarValueType="YES"/>
+        <attribute name="smsNotificationsEnabled" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="smsStatementDay" optional="YES" attributeType="Integer 16" defaultValueString="1" usesScalarValueType="YES"/>
+        <attribute name="smsProviderName" optional="YES" attributeType="String" defaultValueString="celcomAfrica"/>
+        <attribute name="smsTestModeEnabled" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
     </entity>
     <entity name="Loan" representedClassName="Loan" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
@@ -42,9 +46,12 @@
         <attribute name="suspendedDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="totalContributions" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="smsOptIn" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="lastStatementSentDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="loans" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Loan" inverseName="member" inverseEntity="Loan"/>
         <relationship name="payments" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Payment" inverseName="member" inverseEntity="Payment"/>
         <relationship name="transactions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Transaction" inverseName="member" inverseEntity="Transaction"/>
+        <relationship name="notificationHistory" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="NotificationHistory" inverseName="member" inverseEntity="NotificationHistory"/>
     </entity>
     <entity name="Payment" representedClassName="Payment" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
@@ -87,12 +94,29 @@
         <attribute name="memberID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
     </entity>
+    <entity name="NotificationHistory" representedClassName="NotificationHistory" syncable="YES" codeGenerationType="class">
+        <attribute name="notificationID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="type" optional="YES" attributeType="String"/>
+        <attribute name="channel" optional="YES" attributeType="String" defaultValueString="sms"/>
+        <attribute name="recipient" optional="YES" attributeType="String"/>
+        <attribute name="messageContent" optional="YES" attributeType="String"/>
+        <attribute name="status" optional="YES" attributeType="String" defaultValueString="pending"/>
+        <attribute name="sentDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="deliveredDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="errorMessage" optional="YES" attributeType="String"/>
+        <attribute name="cost" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="providerMessageID" optional="YES" attributeType="String"/>
+        <attribute name="reportURL" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="member" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Member" inverseName="notificationHistory" inverseEntity="Member"/>
+    </entity>
     <elements>
-        <element name="FundSettings" positionX="-297" positionY="81" width="128" height="179"/>
+        <element name="FundSettings" positionX="-297" positionY="81" width="128" height="239"/>
         <element name="Loan" positionX="99" positionY="-99" width="128" height="239"/>
-        <element name="Member" positionX="-297" positionY="-99" width="128" height="269"/>
+        <element name="Member" positionX="-297" positionY="-99" width="128" height="299"/>
         <element name="Payment" positionX="-99" positionY="117" width="128" height="224"/>
         <element name="Transaction" positionX="99" positionY="216" width="128" height="179"/>
         <element name="AuditLog" positionX="-99" positionY="360" width="128" height="149"/>
+        <element name="NotificationHistory" positionX="297" positionY="360" width="128" height="239"/>
     </elements>
 </model>

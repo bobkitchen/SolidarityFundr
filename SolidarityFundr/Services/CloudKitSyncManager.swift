@@ -106,35 +106,29 @@ class CloudKitSyncManager: ObservableObject {
         switch event.type {
         case .setup:
             if event.succeeded {
-                print("CloudKit setup succeeded")
                 syncStatus = .success
             } else {
                 let errorMessage = event.error?.localizedDescription ?? "Setup failed"
-                print("CloudKit setup failed: \(errorMessage)")
                 syncStatus = .error(errorMessage)
                 syncError = errorMessage
             }
             
         case .import:
             if event.succeeded {
-                print("CloudKit import succeeded")
                 lastSyncDate = Date()
                 syncStatus = .success
             } else {
                 let errorMessage = event.error?.localizedDescription ?? "Import failed"
-                print("CloudKit import failed: \(errorMessage)")
                 syncStatus = .error(errorMessage)
                 syncError = errorMessage
             }
             
         case .export:
             if event.succeeded {
-                print("CloudKit export succeeded")
                 lastSyncDate = Date()
                 syncStatus = .success
             } else {
                 let errorMessage = event.error?.localizedDescription ?? "Export failed"
-                print("CloudKit export failed: \(errorMessage)")
                 syncStatus = .error(errorMessage)
                 syncError = errorMessage
             }
@@ -167,12 +161,10 @@ class CloudKitSyncManager: ObservableObject {
     
     func triggerSync() async {
         guard isOnline else {
-            print("Offline - skipping sync")
             return
         }
         
         guard syncStatus != .syncing else {
-            print("Sync already in progress")
             return
         }
         
@@ -191,11 +183,8 @@ class CloudKitSyncManager: ObservableObject {
             // Force a remote sync check by accessing the coordinator
             _ = container.persistentStoreCoordinator
             
-            print("Manual sync triggered successfully")
-            
         } catch {
             let errorMessage = error.localizedDescription
-            print("Manual sync failed: \(errorMessage)")
             
             await MainActor.run {
                 syncStatus = .error(errorMessage)
@@ -226,7 +215,6 @@ class CloudKitSyncManager: ObservableObject {
             let container = CKContainer(identifier: "iCloud.com.bobk.SolidarityFundr")
             return try await container.accountStatus()
         } catch {
-            print("Failed to check CloudKit account status: \(error)")
             return .couldNotDetermine
         }
     }

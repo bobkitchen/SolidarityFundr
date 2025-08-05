@@ -17,6 +17,7 @@ struct MemberDetailView: View {
     @State private var showingCashOutConfirmation = false
     @State private var showingNewLoan = false
     @State private var showingNewPayment = false
+    @State private var refreshID = UUID()
     
     var body: some View {
         ScrollView {
@@ -119,6 +120,18 @@ struct MemberDetailView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { notification in
+            if let updatedMember = notification.object as? Member,
+               updatedMember.objectID == member.objectID {
+                // Force refresh when this member's data is updated
+                refreshID = UUID()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            // Force refresh when any payment is saved
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
     
     // MARK: - View Components
@@ -366,9 +379,58 @@ struct ContactInfoCard: View {
             }
             
             if let phone = member.phoneNumber {
-                Label(phone, systemImage: "phone.fill")
+                HStack {
+                    Label(phone, systemImage: "phone.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    if PhoneNumberValidator.validate(phone) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                    }
+                }
+            }
+            
+            Divider()
+            
+            HStack {
+                Label("SMS Notifications", systemImage: "message.fill")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                if member.smsOptIn && member.phoneNumber != nil && PhoneNumberValidator.validate(member.phoneNumber!) {
+                    Text("Enabled")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.2))
+                        .foregroundColor(.green)
+                        .cornerRadius(4)
+                } else {
+                    Text("Disabled")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.gray.opacity(0.2))
+                        .foregroundColor(.gray)
+                        .cornerRadius(4)
+                }
+            }
+            
+            if let lastSent = member.lastStatementSentDate {
+                HStack {
+                    Text("Last Statement Sent")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(DateHelper.formatDate(lastSent))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -633,6 +695,8 @@ struct EditMemberSheet: View {
     @State private var email: String = ""
     @State private var phone: String = ""
     @State private var joinDate = Date()
+    @State private var smsOptIn: Bool = false
+    @State private var showingPhoneError = false
     
     var body: some View {
         NavigationStack {
@@ -651,9 +715,42 @@ struct EditMemberSheet: View {
                 Section("Contact Information") {
                     TextField("Email", text: $email)
                         .textContentType(.emailAddress)
+                        #if os(iOS)
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                        #endif
                     
-                    TextField("Phone Number", text: $phone)
-                        .textContentType(.telephoneNumber)
+                    HStack {
+                        TextField("Phone Number", text: $phone)
+                            .textContentType(.telephoneNumber)
+                            #if os(iOS)
+                            .keyboardType(.phonePad)
+                            #endif
+                        
+                        if !phone.isEmpty {
+                            Image(systemName: PhoneNumberValidator.validate(phone) ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(PhoneNumberValidator.validate(phone) ? .green : .red)
+                        }
+                    }
+                    
+                    if !phone.isEmpty && !PhoneNumberValidator.validate(phone) {
+                        Text("Please enter a valid Kenyan phone number")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                    
+                    Toggle("SMS Notifications", isOn: $smsOptIn)
+                        .disabled(phone.isEmpty || !PhoneNumberValidator.validate(phone))
+                    
+                    if smsOptIn && PhoneNumberValidator.validate(phone) {
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                            Text("Member will receive monthly statements via SMS")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 
                 Section("Employment Details") {
@@ -675,6 +772,7 @@ struct EditMemberSheet: View {
                         member.memberRole = role
                         member.email = email.isEmpty ? nil : email
                         member.phoneNumber = phone.isEmpty ? nil : phone
+                        member.smsOptIn = smsOptIn && PhoneNumberValidator.validate(phone)
                         member.joinDate = joinDate
                         viewModel.updateMember()
                         dismiss()
@@ -688,6 +786,7 @@ struct EditMemberSheet: View {
             role = member.memberRole
             email = member.email ?? ""
             phone = member.phoneNumber ?? ""
+            smsOptIn = member.smsOptIn
             joinDate = member.joinDate ?? Date()
         }
     }

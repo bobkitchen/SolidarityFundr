@@ -133,4 +133,39 @@ extension FundSettings {
         
         return settings
     }
+    
+    // MARK: - Statement Settings
+    
+    var statementDayOfMonth: Int {
+        get {
+            return Int(smsStatementDay)
+        }
+        set {
+            smsStatementDay = Int16(max(1, min(28, newValue))) // Ensure valid day
+        }
+    }
+    
+    var isTimeToSendStatements: Bool {
+        let calendar = Calendar.current
+        let today = Date()
+        let currentDay = calendar.component(.day, from: today)
+        return currentDay == statementDayOfMonth && smsNotificationsEnabled
+    }
+    
+    func getNextStatementDate() -> Date? {
+        let calendar = Calendar.current
+        let today = Date()
+        let currentDay = calendar.component(.day, from: today)
+        
+        var components = calendar.dateComponents([.year, .month], from: today)
+        components.day = Int(smsStatementDay)
+        
+        if let nextDate = calendar.date(from: components), nextDate > today {
+            return nextDate
+        } else {
+            // Next month
+            components.month! += 1
+            return calendar.date(from: components)
+        }
+    }
 }

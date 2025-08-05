@@ -163,13 +163,34 @@ struct DetailView: View {
 
 struct OverviewView: View {
     @EnvironmentObject var dataManager: DataManager
+    @State private var refreshID = UUID()
+    @State private var isRecalculating = false
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Solidarity Fund Overview")
-                    .font(.largeTitle)
-                    .padding(.bottom)
+                HStack {
+                    Text("Solidarity Fund Overview")
+                        .font(.largeTitle)
+                    Spacer()
+                    Button {
+                        isRecalculating = true
+                        dataManager.recalculateAllMemberContributions()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            isRecalculating = false
+                            refreshID = UUID()
+                        }
+                    } label: {
+                        if isRecalculating {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Label("Recalculate", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(isRecalculating)
+                }
+                .padding(.bottom)
                 
                 HStack(spacing: 20) {
                     StatCard(
@@ -221,6 +242,15 @@ struct OverviewView: View {
             .padding()
         }
         .navigationTitle("Overview")
+        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+            // Force refresh when transactions are updated
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            // Force refresh when a payment is saved
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
     
     func formatCurrency(_ amount: Double) -> String {

@@ -331,7 +331,7 @@ struct PaymentsView: View {
     private func exportPayments() {
         let csv = viewModel.exportPayments()
         // TODO: Implement file export
-        print("Export CSV: \(csv)")
+        // Export CSV generated
     }
 }
 

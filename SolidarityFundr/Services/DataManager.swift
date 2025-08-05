@@ -31,6 +31,8 @@ class DataManager: ObservableObject {
         // Defer initial data fetch to avoid publishing changes during initialization
         DispatchQueue.main.async { [weak self] in
             self?.fetchInitialData()
+            // Ensure transaction balances are correct on startup
+            self?.recalculateAllTransactionBalances()
         }
     }
     
@@ -66,7 +68,7 @@ class DataManager: ObservableObject {
     }
     
     @discardableResult
-    func createMember(name: String, role: MemberRole, email: String? = nil, phoneNumber: String? = nil, joinDate: Date = Date()) -> Member {
+    func createMember(name: String, role: MemberRole, email: String? = nil, phoneNumber: String? = nil, joinDate: Date = Date(), smsOptIn: Bool = false) -> Member {
         let member = Member(context: context)
         member.memberID = UUID()
         member.name = name
@@ -78,6 +80,7 @@ class DataManager: ObservableObject {
         member.updatedAt = Date()
         member.memberStatus = .active
         member.totalContributions = 0
+        member.smsOptIn = smsOptIn && phoneNumber != nil && PhoneNumberValidator.validate(phoneNumber ?? "")
         
         saveContext()
         fetchMembers()
@@ -115,6 +118,48 @@ class DataManager: ObservableObject {
         context.delete(member)
         saveContext()
         fetchMembers()
+    }
+    
+    func deleteTestUsers() {
+        let testUserNames = ["Test User", "John Doe", "Jane Doe", "Test Member", "Sample Member"]
+        
+        let request: NSFetchRequest<Member> = Member.fetchRequest()
+        request.predicate = NSPredicate(format: "name IN %@", testUserNames)
+        
+        do {
+            let testMembers = try context.fetch(request)
+            for member in testMembers {
+                // Delete associated transactions, loans, and payments
+                if let transactions = member.transactions as? Set<Transaction> {
+                    for transaction in transactions {
+                        context.delete(transaction)
+                    }
+                }
+                if let loans = member.loans as? Set<Loan> {
+                    for loan in loans {
+                        if let payments = loan.payments as? Set<Payment> {
+                            for payment in payments {
+                                context.delete(payment)
+                            }
+                        }
+                        context.delete(loan)
+                    }
+                }
+                if let payments = member.payments as? Set<Payment> {
+                    for payment in payments {
+                        context.delete(payment)
+                    }
+                }
+                
+                context.delete(member)
+            }
+            
+            try context.save()
+            fetchInitialData() // Refresh all data after deletion
+            print("Deleted \(testMembers.count) test users")
+        } catch {
+            print("Failed to delete test users: \(error)")
+        }
     }
     
     // MARK: - Loan Operations
@@ -259,7 +304,27 @@ class DataManager: ObservableObject {
         member.updatedAt = Date()
         saveContext()
         
+        // Refresh recent transactions
+        fetchRecentTransactions()
+        
         return payment
+    }
+    
+    func recalculateAllMemberContributions() {
+        let request: NSFetchRequest<Member> = Member.fetchRequest()
+        
+        do {
+            let allMembers = try context.fetch(request)
+            
+            for member in allMembers {
+                recalculateMemberContributions(member)
+            }
+            
+            print("✅ Recalculated contributions for \(allMembers.count) members")
+            
+        } catch {
+            print("Error recalculating all member contributions: \(error)")
+        }
     }
     
     // MARK: - Transaction Operations
@@ -344,9 +409,17 @@ class DataManager: ObservableObject {
     func fetchRecentTransactions(limit: Int = 50) {
         let request = Transaction.fetchRequest()
         request.fetchLimit = limit
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
         
         do {
             recentTransactions = try context.fetch(request)
+            print("📋 Fetched \(recentTransactions.count) recent transactions")
+            if let first = recentTransactions.first {
+                print("   Most recent: \(first.transactionType.displayName) - \(first.amount) on \(first.transactionDate ?? Date())")
+            }
+            
+            // Post notification that transactions have been updated
+            NotificationCenter.default.post(name: .transactionsUpdated, object: nil)
         } catch {
             print("Error fetching transactions: \(error)")
         }
@@ -408,6 +481,73 @@ class DataManager: ObservableObject {
         print("   Previous Loan Balance: \(previousLoanBalance) -> New: \(transaction.loanBalance)")
         
         return transaction
+    }
+    
+    // MARK: - Transaction Balance Recalculation
+    
+    func recalculateAllTransactionBalances() {
+        // Fetch all transactions ordered by date
+        let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
+        
+        do {
+            let transactions = try context.fetch(request)
+            
+            var currentFundBalance = fundSettings?.bobInitialInvestment ?? 100000
+            var currentLoanBalance: Double = 0
+            
+            for transaction in transactions {
+                // Store previous balance
+                transaction.previousBalance = currentFundBalance
+                
+                // Calculate the impact on fund balance
+                var fundBalanceChange: Double = 0
+                var loanBalanceChange: Double = 0
+                
+                switch transaction.transactionType {
+                case .contribution:
+                    fundBalanceChange = transaction.amount
+                case .loanDisbursement:
+                    fundBalanceChange = -abs(transaction.amount)
+                    loanBalanceChange = abs(transaction.amount)
+                case .loanRepayment:
+                    fundBalanceChange = abs(transaction.amount)
+                    loanBalanceChange = -abs(transaction.amount)
+                case .interestApplied:
+                    fundBalanceChange = transaction.amount
+                case .cashOut:
+                    fundBalanceChange = -abs(transaction.amount)
+                case .bobInvestment:
+                    fundBalanceChange = transaction.amount
+                case .bobWithdrawal:
+                    fundBalanceChange = -abs(transaction.amount)
+                }
+                
+                // Update balances
+                currentFundBalance += fundBalanceChange
+                currentLoanBalance += loanBalanceChange
+                
+                transaction.balance = currentFundBalance
+                transaction.loanBalance = currentLoanBalance
+                transaction.updatedAt = Date()
+            }
+            
+            // Save all changes
+            saveContext()
+            
+            // Force refresh
+            objectWillChange.send()
+            
+            // Refresh recent transactions
+            fetchRecentTransactions()
+            
+            print("✅ Recalculated balances for \(transactions.count) transactions")
+            print("   Final Fund Balance: \(currentFundBalance)")
+            print("   Final Loan Balance: \(currentLoanBalance)")
+            
+        } catch {
+            print("Error recalculating transaction balances: \(error)")
+        }
     }
     
     // MARK: - Transaction Reconciliation
@@ -559,6 +699,42 @@ class DataManager: ObservableObject {
         }
     }
     
+    // MARK: - Member Calculations
+    
+    func recalculateMemberContributions(_ member: Member) {
+        // Get all contribution payments for this member
+        let request = Payment.paymentsForMember(member)
+        request.predicate = NSPredicate(format: "member == %@ AND type == %@", member, PaymentType.contribution.rawValue)
+        
+        do {
+            let payments = try context.fetch(request)
+            
+            // Calculate total contributions
+            let totalContributions = payments.reduce(0) { $0 + $1.contributionAmount }
+            
+            print("📊 Recalculating contributions for \(member.name ?? "Unknown")")
+            print("   Found \(payments.count) contribution payments")
+            print("   Previous total: \(member.totalContributions)")
+            print("   New total: \(totalContributions)")
+            
+            // Update member's total contributions
+            member.totalContributions = totalContributions
+            member.updatedAt = Date()
+            
+            // Save context
+            saveContext()
+            
+            // Force refresh
+            objectWillChange.send()
+            
+            // Post notification
+            NotificationCenter.default.post(name: .memberDataUpdated, object: member)
+            
+        } catch {
+            print("Error recalculating member contributions: \(error)")
+        }
+    }
+    
     // MARK: - Core Data
     
     private func saveContext() {
@@ -595,6 +771,13 @@ enum DataManagerError: LocalizedError {
             return "Insufficient funds in the solidarity fund."
         }
     }
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    static let memberDataUpdated = Notification.Name("memberDataUpdated")
+    static let transactionsUpdated = Notification.Name("transactionsUpdated")
 }
 
 // MARK: - Report Models

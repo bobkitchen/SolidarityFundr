@@ -192,6 +192,39 @@ struct MembersListView: View {
                 MemberRowView(member: member) {
                     selectedMember = member
                 }
+                .contextMenu {
+                    Button {
+                        selectedMember = member
+                    } label: {
+                        Label("View Details", systemImage: "person.text.rectangle")
+                    }
+                    
+                    Divider()
+                    
+                    if member.memberStatus == .active {
+                        Button {
+                            viewModel.suspendMember(member)
+                        } label: {
+                            Label("Suspend Member", systemImage: "pause.circle")
+                        }
+                    } else if member.memberStatus == .suspended {
+                        Button {
+                            viewModel.reactivateMember(member)
+                        } label: {
+                            Label("Reactivate Member", systemImage: "play.circle")
+                        }
+                    }
+                    
+                    if viewModel.canDeleteMember(member) {
+                        Divider()
+                        
+                        Button(role: .destructive) {
+                            viewModel.confirmDelete(for: member)
+                        } label: {
+                            Label("Delete Member", systemImage: "trash")
+                        }
+                    }
+                }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     if member.memberStatus == .active {
                         Button {
@@ -346,10 +379,43 @@ struct AddMemberSheet: View {
                     TextField("Email (Optional)", text: $viewModel.newMemberEmail)
                         .focused($focusedField, equals: .email)
                         .textContentType(.emailAddress)
+                        #if os(iOS)
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                        #endif
                     
-                    TextField("Phone Number (Optional)", text: $viewModel.newMemberPhone)
-                        .focused($focusedField, equals: .phone)
-                        .textContentType(.telephoneNumber)
+                    HStack {
+                        TextField("Phone Number (Optional)", text: $viewModel.newMemberPhone)
+                            .focused($focusedField, equals: .phone)
+                            .textContentType(.telephoneNumber)
+                            #if os(iOS)
+                            .keyboardType(.phonePad)
+                            #endif
+                        
+                        if !viewModel.newMemberPhone.isEmpty {
+                            Image(systemName: PhoneNumberValidator.validate(viewModel.newMemberPhone) ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(PhoneNumberValidator.validate(viewModel.newMemberPhone) ? .green : .red)
+                        }
+                    }
+                    
+                    if !viewModel.newMemberPhone.isEmpty && !PhoneNumberValidator.validate(viewModel.newMemberPhone) {
+                        Text("Please enter a valid Kenyan phone number")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                    
+                    Toggle("SMS Notifications", isOn: $viewModel.newMemberSMSOptIn)
+                        .disabled(viewModel.newMemberPhone.isEmpty || !PhoneNumberValidator.validate(viewModel.newMemberPhone))
+                    
+                    if viewModel.newMemberSMSOptIn && PhoneNumberValidator.validate(viewModel.newMemberPhone) {
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                            Text("Member will receive monthly statements via SMS")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 
                 Section("Employment Details") {

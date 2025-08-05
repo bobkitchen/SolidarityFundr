@@ -95,6 +95,43 @@ extension Member {
     static func activeMembers() -> NSFetchRequest<Member> {
         return customFetchRequest(predicate: NSPredicate(format: "status == %@", MemberStatus.active.rawValue))
     }
+    
+    // MARK: - SMS Related Properties
+    
+    var firstName: String? {
+        guard let name = name else { return nil }
+        let components = name.split(separator: " ")
+        return components.first.map(String.init)
+    }
+    
+    var lastName: String? {
+        guard let name = name else { return nil }
+        let components = name.split(separator: " ")
+        return components.count > 1 ? components.dropFirst().joined(separator: " ") : nil
+    }
+    
+    var currentLoanBalance: Double {
+        return totalActiveLoanBalance
+    }
+    
+    var nextPaymentDueDate: Date? {
+        return activeLoans
+            .compactMap { $0.dueDate }
+            .sorted()
+            .first
+    }
+    
+    var canReceiveSMS: Bool {
+        return memberStatus == .active && 
+               phoneNumber != nil && 
+               !phoneNumber!.isEmpty &&
+               smsOptIn
+    }
+    
+    var formattedPhoneNumber: String? {
+        guard let phone = phoneNumber else { return nil }
+        return PhoneNumberValidator.formatToInternational(phone)
+    }
 }
 
 enum MemberRole: String, CaseIterable {

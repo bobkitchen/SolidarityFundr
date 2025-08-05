@@ -102,14 +102,13 @@ struct PersistenceController {
             }
             
             if event.type == .setup {
-                print("CloudKit setup: \(event.succeeded ? "Succeeded" : "Failed")")
                 if let error = event.error {
-                    print("CloudKit setup error: \(error.localizedDescription)")
+                    // CloudKit setup error occurred
                 }
             } else if event.type == .import {
-                print("CloudKit import: \(event.succeeded ? "Succeeded" : "Failed")")
+                // CloudKit import event
             } else if event.type == .export {
-                print("CloudKit export: \(event.succeeded ? "Succeeded" : "Failed")")
+                // CloudKit export event
             }
         }
     }
