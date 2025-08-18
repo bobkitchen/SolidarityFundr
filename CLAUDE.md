@@ -65,11 +65,13 @@ xcodebuild -project SolidarityFundr.xcodeproj -scheme SolidarityFundr clean
   - Driver/Assistant: KSH 40,000
   - Housekeeper: KSH 19,000
   - Grounds Keeper: KSH 19,000
-  - Guards/Part-time: Contributions to date, max KSH 12,000
+  - Guards/Part-time: Contributions to date, max KSH 10,000
 - Guards require 3 months of contributions before loan eligibility
 
 ### Loan System
-- Interest-free loans with 3 or 4 month repayment periods
+- Interest-free loans with flexible repayment periods:
+  - Guards/Part-time: 6 month repayment period (KSH 1,667/month for KSH 10,000 loan)
+  - All other staff: 3 or 4 month repayment periods
 - Monthly payments include loan repayment + KSH 2,000 contribution
 - Automatic completion when balance reaches zero
 - Cannot delete members with active loans

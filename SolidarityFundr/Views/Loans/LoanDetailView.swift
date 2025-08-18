@@ -590,8 +590,12 @@ struct EditLoanSheet: View {
                     
                     // Repayment Period
                     Picker("Repayment Period", selection: $repaymentMonths) {
-                        Text("3 Months").tag(3)
-                        Text("4 Months").tag(4)
+                        if loan.member?.memberRole == .securityGuard || loan.member?.memberRole == .partTime {
+                            Text("6 Months").tag(6)
+                        } else {
+                            Text("3 Months").tag(3)
+                            Text("4 Months").tag(4)
+                        }
                     }
                     
                     // Issue Date

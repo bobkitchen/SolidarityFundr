@@ -51,7 +51,7 @@ extension Member {
         case .housekeeper, .groundsKeeper:
             return 19000
         case .securityGuard, .partTime:
-            return min(totalContributions, 12000)
+            return 10000
         }
     }
     

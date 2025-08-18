@@ -376,11 +376,27 @@ struct NewLoanSheet: View {
                                 
                                 // Repayment Period
                                 Picker("Repayment Period", selection: $viewModel.repaymentMonths) {
-                                    Text("3 Months").tag(3)
-                                    Text("4 Months").tag(4)
+                                    if let member = viewModel.selectedMember,
+                                       (member.memberRole == .securityGuard || member.memberRole == .partTime) {
+                                        Text("6 Months").tag(6)
+                                    } else {
+                                        Text("3 Months").tag(3)
+                                        Text("4 Months").tag(4)
+                                    }
                                 }
                                 .onChange(of: viewModel.repaymentMonths) { _ in
                                     viewModel.calculateLoanDetails()
+                                }
+                                .onChange(of: viewModel.selectedMember) { _ in
+                                    // Reset repayment months when member changes
+                                    if let member = viewModel.selectedMember {
+                                        if member.memberRole == .securityGuard || member.memberRole == .partTime {
+                                            viewModel.repaymentMonths = 6
+                                        } else {
+                                            viewModel.repaymentMonths = 3
+                                        }
+                                        viewModel.calculateLoanDetails()
+                                    }
                                 }
                                 
                                 // Issue Date

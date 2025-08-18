@@ -68,8 +68,16 @@ class BusinessRulesEngine {
         }
         
         // Repayment period validation
-        if repaymentMonths != 3 && repaymentMonths != 4 {
-            errors.append("Repayment period must be 3 or 4 months")
+        if member.memberRole == .securityGuard || member.memberRole == .partTime {
+            // Guards and part-time staff must use 6-month repayment period
+            if repaymentMonths != 6 {
+                errors.append("Guards and part-time staff must use 6-month repayment period")
+            }
+        } else {
+            // Other staff use 3 or 4 month repayment periods
+            if repaymentMonths != 3 && repaymentMonths != 4 {
+                errors.append("Repayment period must be 3 or 4 months")
+            }
         }
         
         // Fund utilization warning
