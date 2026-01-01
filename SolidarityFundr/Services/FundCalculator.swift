@@ -60,20 +60,19 @@ class FundCalculator {
     }
     
     func calculateTotalActiveLoans() -> Double {
-        // Get the loan balance from the most recent transaction
-        let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
-        request.fetchLimit = 1
-        
+        // Calculate by summing balance from all active Loan entities (ground truth)
+        // This is more reliable than the transaction ledger which can drift
+        let request: NSFetchRequest<Loan> = Loan.fetchRequest()
+        request.predicate = NSPredicate(format: "status == %@", LoanStatus.active.rawValue)
+
         do {
-            if let lastTransaction = try context.fetch(request).first {
-                return lastTransaction.loanBalance
-            }
+            let activeLoans = try context.fetch(request)
+            let totalBalance = activeLoans.reduce(0) { $0 + $1.balance }
+            return totalBalance
         } catch {
-            print("Error fetching last transaction for loan balance: \(error)")
+            print("Error fetching active loans: \(error)")
+            return 0
         }
-        
-        return 0
     }
     
     func calculateTotalWithdrawn() -> Double {
@@ -97,24 +96,61 @@ class FundCalculator {
         }
     }
     
+    func calculateTotalCapital(settings: FundSettings? = nil) -> Double {
+        let fundSettings = settings ?? FundSettings.fetchOrCreate(in: context)
+        let totalContributions = calculateTotalContributions()
+        // Total capital is the initial investment plus all contributions made
+        // This represents the total funds put into the system
+        return fundSettings.bobInitialInvestment + totalContributions
+    }
+    
     // MARK: - Utilization Calculations
     
     func calculateUtilizationPercentage(settings: FundSettings? = nil) -> Double {
-        let fundBalance = calculateFundBalance(settings: settings)
-        guard fundBalance > 0 else { return 0 }
+        // Calculate utilization as active loans divided by total capital
+        // Total capital = initial investment + all contributions
+        let totalCapital = calculateTotalCapital(settings: settings)
+        guard totalCapital > 0 else {
+            print("⚠️ WARNING: Total capital is 0 in calculateUtilizationPercentage")
+            return 0
+        }
         
         let activeLoans = calculateTotalActiveLoans()
-        return activeLoans / fundBalance
+        let utilization = activeLoans / totalCapital
+        
+        // Ensure result is finite
+        guard utilization.isFinite else {
+            print("⚠️ WARNING: Utilization calculation resulted in non-finite value")
+            return 0
+        }
+        
+        // Debug logging commented out to reduce console noise
+        // print("📊 Utilization calc - Capital: \(totalCapital), Loans: \(activeLoans), Util: \(utilization * 100)%")
+        return utilization
     }
     
     func calculateUtilizationAfterLoan(loanAmount: Double, settings: FundSettings? = nil) -> Double {
-        let fundBalance = calculateFundBalance(settings: settings)
-        guard fundBalance > 0 else { return 0 }
+        // Calculate what utilization would be after adding a new loan
+        // Using total capital (not net balance) as the denominator
+        let totalCapital = calculateTotalCapital(settings: settings)
+        guard totalCapital > 0 else {
+            print("⚠️ WARNING: Total capital is 0 in calculateUtilizationAfterLoan")
+            return 0
+        }
         
         let currentActiveLoans = calculateTotalActiveLoans()
         let newActiveLoans = currentActiveLoans + loanAmount
+        let utilization = newActiveLoans / totalCapital
         
-        return newActiveLoans / fundBalance
+        // Ensure result is finite
+        guard utilization.isFinite else {
+            print("⚠️ WARNING: Utilization after loan calculation resulted in non-finite value")
+            return 0
+        }
+        
+        // Debug logging commented out to reduce console noise
+        // print("💰 Utilization after loan - Capital: \(totalCapital), New loans total: \(newActiveLoans), New util: \(utilization * 100)%")
+        return utilization
     }
     
     // MARK: - Member Calculations

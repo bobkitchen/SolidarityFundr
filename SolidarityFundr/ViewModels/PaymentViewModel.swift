@@ -129,8 +129,13 @@ class PaymentViewModel: ObservableObject {
         
         // Observe loan payment toggle
         $isLoanPayment
-            .sink { [weak self] _ in
-                self?.calculatePaymentBreakdown()
+            .sink { [weak self] isLoan in
+                guard let self = self else { return }
+                // Clear selected loan when switching to contribution
+                if !isLoan {
+                    self.selectedLoan = nil
+                }
+                self.calculatePaymentBreakdown()
             }
             .store(in: &cancellables)
         
@@ -189,10 +194,13 @@ class PaymentViewModel: ObservableObject {
         }
         
         do {
+            // Only pass loan if this is explicitly a loan payment
+            let loanToProcess = isLoanPayment ? selectedLoan : nil
+
             let payment = try dataManager.processPayment(
                 for: member,
                 amount: amount,
-                loan: selectedLoan,
+                loan: loanToProcess,
                 method: paymentMethod,
                 paymentDate: paymentDate,
                 notes: paymentNotes.isEmpty ? nil : paymentNotes

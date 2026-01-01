@@ -18,11 +18,19 @@ extension FundSettings {
     }
     
     func calculateUtilizationPercentage() -> Double {
-        let fundBalance = calculateFundBalance()
-        guard fundBalance > 0 else { return 0 }
+        // Calculate utilization as active loans divided by total capital
+        // Total capital = initial investment + all contributions
+        let totalCapital = calculateTotalCapital()
+        guard totalCapital > 0 else {
+            print("⚠️ WARNING: Total capital is 0 in calculateUtilizationPercentage")
+            return 0
+        }
         
         let activeLoans = calculateTotalActiveLoans()
-        return (activeLoans / fundBalance)
+        let utilization = activeLoans / totalCapital
+        // Debug logging commented out to reduce console noise
+        // print("📊 Utilization calc - Capital: \(totalCapital), Loans: \(activeLoans), Util: \(utilization * 100)%")
+        return utilization
     }
     
     func calculateFundBalance() -> Double {
@@ -42,6 +50,16 @@ extension FundSettings {
         
         // Fallback to Bob's initial investment if no transactions exist
         return bobInitialInvestment
+    }
+    
+    func calculateTotalCapital() -> Double {
+        // Total capital is the initial investment plus all contributions
+        // This represents the total funds put into the system
+        let totalContributions = calculateTotalContributions()
+        let capital = bobInitialInvestment + totalContributions
+        // Debug logging commented out to reduce console noise
+        // print("💵 Total capital calculation - Initial: \(bobInitialInvestment), Contributions: \(totalContributions), Total: \(capital)")
+        return capital
     }
     
     private func calculateTotalContributions() -> Double {
@@ -66,22 +84,21 @@ extension FundSettings {
         }
     }
     
-    private func calculateTotalActiveLoans() -> Double {
-        // Get the loan balance from the most recent transaction
+    func calculateTotalActiveLoans() -> Double {
+        // Calculate by summing balance from all active Loan entities (ground truth)
+        // This is more reliable than the transaction ledger which can drift
         let context = self.managedObjectContext ?? PersistenceController.shared.container.viewContext
-        let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
-        request.fetchLimit = 1
-        
+        let request: NSFetchRequest<Loan> = Loan.fetchRequest()
+        request.predicate = NSPredicate(format: "status == %@", LoanStatus.active.rawValue)
+
         do {
-            if let lastTransaction = try context.fetch(request).first {
-                return lastTransaction.loanBalance
-            }
+            let activeLoans = try context.fetch(request)
+            let totalBalance = activeLoans.reduce(0) { $0 + $1.balance }
+            return totalBalance
         } catch {
-            print("Error fetching last transaction for loan balance: \(error)")
+            print("Error fetching active loans: \(error)")
+            return 0
         }
-        
-        return 0
     }
     
     private func calculateTotalWithdrawn() -> Double {
