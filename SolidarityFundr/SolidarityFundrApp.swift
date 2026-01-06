@@ -10,7 +10,7 @@ import AppIntents
 
 @main
 struct SolidarityFundrApp: App {
-    
+
     init() {
         // Register App Shortcuts
         SolidarityFundShortcuts.updateAppShortcutParameters()
@@ -18,9 +18,9 @@ struct SolidarityFundrApp: App {
     let persistenceController = PersistenceController.shared
     @StateObject private var dataManager = DataManager.shared
     @StateObject private var authManager = AuthenticationManager.shared
-    // Remove WindowConfigurator - not needed for macOS 26 compliance
 
     var body: some Scene {
+        // MARK: - Main Window
         WindowGroup {
             Group {
                 if authManager.isAuthenticated && !authManager.isLocked {
@@ -65,17 +65,50 @@ struct SolidarityFundrApp: App {
                     NotificationCenter.default.post(name: .newMemberRequested, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
-                
+
                 Button("New Loan") {
                     NotificationCenter.default.post(name: .newLoanRequested, object: nil)
                 }
                 .keyboardShortcut("l", modifiers: .command)
-                
+
                 Button("New Payment") {
                     NotificationCenter.default.post(name: .newPaymentRequested, object: nil)
                 }
                 .keyboardShortcut("p", modifiers: .command)
             }
+        }
+        #endif
+
+        // MARK: - Member Detail Window
+        WindowGroup(id: "member-detail", for: UUID.self) { $memberID in
+            MemberWindowView(memberID: memberID)
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                .environmentObject(dataManager)
+        }
+        #if os(macOS)
+        .windowStyle(.automatic)
+        .windowToolbarStyle(.unified)
+        .defaultSize(width: 700, height: 800)
+        #endif
+
+        // MARK: - Loan Detail Window
+        WindowGroup(id: "loan-detail", for: UUID.self) { $loanID in
+            LoanWindowView(loanID: loanID)
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                .environmentObject(dataManager)
+        }
+        #if os(macOS)
+        .windowStyle(.automatic)
+        .windowToolbarStyle(.unified)
+        .defaultSize(width: 650, height: 700)
+        #endif
+
+        // MARK: - Settings Window (⌘,)
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                .environmentObject(dataManager)
         }
         #endif
     }

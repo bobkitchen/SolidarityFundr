@@ -43,59 +43,89 @@ class BusinessRulesEngine {
     }
     
     // MARK: - Loan Validation
-    
-    func validateLoanRequest(member: Member, amount: Double, repaymentMonths: Int, fundSettings: FundSettings?) -> ValidationResult {
+
+    /// Validates a loan request with optional admin override
+    /// - Parameters:
+    ///   - member: The member requesting the loan
+    ///   - amount: The loan amount requested
+    ///   - repaymentMonths: The repayment period in months
+    ///   - fundSettings: The current fund settings
+    ///   - adminOverride: If true, converts rule violations to warnings instead of errors (except critical ones)
+    /// - Returns: ValidationResult with errors, warnings, and override info
+    func validateLoanRequest(member: Member, amount: Double, repaymentMonths: Int, fundSettings: FundSettings?, adminOverride: Bool = false) -> ValidationResult {
         var errors: [String] = []
         var warnings: [String] = []
-        
-        // Member eligibility
+        var overriddenRules: [String] = []
+
+        // Member eligibility - can be overridden
         if !member.isEligibleForLoan {
             if member.memberStatus != .active {
+                // Cannot override inactive/suspended status
                 errors.append("Member must be active to receive a loan")
             } else if member.memberRole == .securityGuard && member.monthsAsMember < 3 {
-                errors.append("Guards must have 3 months of contributions before taking a loan")
+                let message = "Guards must have 3 months of contributions before taking a loan (currently \(member.monthsAsMember) months)"
+                if adminOverride {
+                    warnings.append("⚠️ OVERRIDE: \(message)")
+                    overriddenRules.append("Guard eligibility requirement")
+                } else {
+                    errors.append(message)
+                }
             }
         }
-        
+
         // Amount validation
         if amount <= 0 {
             errors.append("Loan amount must be greater than zero")
         } else {
             let maxAmount = member.maximumLoanAmount
+            let baseLimit = member.baseLoanLimit
             if amount > maxAmount {
-                errors.append("Loan amount exceeds maximum allowed: KSH \(Int(maxAmount))")
+                let message = "Loan amount (KSH \(Int(amount))) exceeds maximum allowed (KSH \(Int(maxAmount))). Base limit: KSH \(Int(baseLimit))"
+                if adminOverride {
+                    warnings.append("⚠️ OVERRIDE: \(message)")
+                    overriddenRules.append("Loan amount limit")
+                } else {
+                    errors.append("Loan amount exceeds maximum allowed: KSH \(Int(maxAmount))")
+                }
             }
         }
-        
-        // Repayment period validation
-        if member.memberRole == .securityGuard || member.memberRole == .partTime {
-            // Guards and part-time staff must use 6-month repayment period
-            if repaymentMonths != 6 {
-                errors.append("Guards and part-time staff must use 6-month repayment period")
-            }
-        } else {
-            // Other staff use 3 or 4 month repayment periods
-            if repaymentMonths != 3 && repaymentMonths != 4 {
-                errors.append("Repayment period must be 3 or 4 months")
+
+        // Repayment period validation - uses member's allowed months (respects custom settings)
+        let allowedMonths = member.allowedRepaymentMonths
+        if !allowedMonths.contains(repaymentMonths) {
+            let allowedStr = allowedMonths.map { "\($0)" }.joined(separator: " or ")
+            let message = "Repayment period must be \(allowedStr) months for this member"
+            if adminOverride {
+                warnings.append("⚠️ OVERRIDE: Using \(repaymentMonths) months instead of allowed \(allowedStr)")
+                overriddenRules.append("Repayment period restriction")
+            } else {
+                errors.append(message)
             }
         }
-        
-        // Fund utilization warning
+
+        // Fund utilization warning (always a warning, not blocking)
         if let settings = fundSettings {
-            let currentUtilization = settings.calculateUtilizationPercentage()
-            let fundBalance = settings.calculateFundBalance()
-            let newUtilization = (currentUtilization * fundBalance + amount) / fundBalance
-            
+            let totalCapital = settings.calculateTotalCapital()
+            guard totalCapital > 0 else {
+                print("⚠️ WARNING: Total capital is 0 or negative: \(totalCapital)")
+                return ValidationResult(isValid: errors.isEmpty, errors: errors, warnings: warnings, overriddenRules: overriddenRules)
+            }
+            let currentActiveLoans = settings.calculateTotalActiveLoans()
+            let newActiveLoans = currentActiveLoans + amount
+            let newUtilization = newActiveLoans / totalCapital
+            print("💰 Loan validation - Capital: \(totalCapital), Current Loans: \(currentActiveLoans), New Total: \(newActiveLoans), Utilization: \(newUtilization * 100)%")
+
             if newUtilization >= settings.utilizationWarningThreshold {
                 warnings.append("This loan will push fund utilization above \(Int(settings.utilizationWarningThreshold * 100))%")
             }
-            
+
+            let fundBalance = settings.calculateFundBalance()
             if fundBalance - amount < settings.minimumFundBalance {
                 warnings.append("This loan will reduce fund balance below minimum threshold of KSH \(Int(settings.minimumFundBalance))")
             }
         }
-        
-        return ValidationResult(isValid: errors.isEmpty, errors: errors, warnings: warnings)
+
+        return ValidationResult(isValid: errors.isEmpty, errors: errors, warnings: warnings, overriddenRules: overriddenRules)
     }
     
     // MARK: - Payment Validation
@@ -223,20 +253,36 @@ struct ValidationResult {
     let isValid: Bool
     let errors: [String]
     let warnings: [String]
-    
+    let overriddenRules: [String]
+
+    init(isValid: Bool, errors: [String], warnings: [String], overriddenRules: [String] = []) {
+        self.isValid = isValid
+        self.errors = errors
+        self.warnings = warnings
+        self.overriddenRules = overriddenRules
+    }
+
     var hasWarnings: Bool {
         return !warnings.isEmpty
     }
-    
+
+    var hasOverrides: Bool {
+        return !overriddenRules.isEmpty
+    }
+
     var allMessages: [String] {
         return errors + warnings
     }
-    
+
     var errorMessage: String? {
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
-    
+
     var warningMessage: String? {
         return warnings.isEmpty ? nil : warnings.joined(separator: "\n")
+    }
+
+    var overrideMessage: String? {
+        return overriddenRules.isEmpty ? nil : "Overridden rules: " + overriddenRules.joined(separator: ", ")
     }
 }

@@ -136,7 +136,7 @@ class DataImportExport {
                 amount: transaction.amount,
                 balance: transaction.balance,
                 type: transaction.type ?? "",
-                description: transaction.description,
+                description: transaction.transactionDescription,
                 transactionDate: transaction.transactionDate,
                 createdAt: transaction.createdAt,
                 updatedAt: transaction.updatedAt

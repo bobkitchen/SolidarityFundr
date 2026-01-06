@@ -71,11 +71,15 @@ struct SpecularLayer: View {
                 .clear
             ])
             
+            // Guard against division by zero
+            let safeX = containerSize.width > 0 ? position.x / containerSize.width : 0.5
+            let safeY = containerSize.height > 0 ? position.y / containerSize.height : 0.5
+            
             let _ = RadialGradient(
                 gradient: primaryGradient,
                 center: UnitPoint(
-                    x: position.x / containerSize.width,
-                    y: position.y / containerSize.height
+                    x: safeX.isFinite ? safeX : 0.5,
+                    y: safeY.isFinite ? safeY : 0.5
                 ),
                 startRadius: 0,
                 endRadius: self.size

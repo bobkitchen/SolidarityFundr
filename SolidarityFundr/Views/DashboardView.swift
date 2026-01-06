@@ -63,28 +63,28 @@ struct DashboardView: View {
                     Label("Overview", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .tag(0)
-            
+
             MembersListView()
                 .tabItem {
                     Label("Members", systemImage: "person.3.fill")
                 }
                 .tag(1)
-            
+
             LoansListView()
                 .tabItem {
                     Label("Loans", systemImage: "creditcard.fill")
                 }
                 .tag(2)
-            
+
             PaymentsView()
                 .tabItem {
                     Label("Payments", systemImage: "dollarsign.circle.fill")
                 }
                 .tag(3)
-            
-            SettingsView()
+
+            ReportsView()
                 .tabItem {
-                    Label("Settings", systemImage: "gear")
+                    Label("Reports", systemImage: "doc.text.fill")
                 }
                 .tag(4)
         }
@@ -95,31 +95,27 @@ struct DashboardView: View {
 #if os(macOS)
 struct SidebarView: View {
     @Binding var selectedTab: Int
-    
+
     var body: some View {
         List(selection: $selectedTab) {
             NavigationLink(value: 0) {
                 Label("Overview", systemImage: "chart.line.uptrend.xyaxis")
             }
-            
+
             NavigationLink(value: 1) {
                 Label("Members", systemImage: "person.3.fill")
             }
-            
+
             NavigationLink(value: 2) {
                 Label("Loans", systemImage: "creditcard.fill")
             }
-            
+
             NavigationLink(value: 3) {
                 Label("Payments", systemImage: "dollarsign.circle.fill")
             }
-            
+
             NavigationLink(value: 4) {
                 Label("Reports", systemImage: "doc.text.fill")
-            }
-            
-            NavigationLink(value: 5) {
-                Label("Settings", systemImage: "gear")
             }
         }
         .navigationTitle("Solidarity Fund")
@@ -130,7 +126,7 @@ struct SidebarView: View {
 struct DetailView: View {
     let selectedTab: Int
     @AppStorage("useLiquidGlass") private var useLiquidGlass: Bool = true
-    
+
     var body: some View {
         switch selectedTab {
         case 0:
@@ -147,9 +143,6 @@ struct DetailView: View {
             PaymentsView()
         case 4:
             ReportsView()
-        case 5:
-            let _ = print("🔧 DashboardView: Loading SettingsView for case 5")
-            SettingsView()
         default:
             if useLiquidGlass {
                 LiquidGlassDashboard()

@@ -173,15 +173,18 @@ class DataManager: ObservableObject {
         }
     }
     
-    func createLoan(for member: Member, amount: Double, repaymentMonths: Int, issueDate: Date = Date(), notes: String? = nil) throws -> Loan {
-        guard member.isEligibleForLoan else {
-            throw DataManagerError.memberNotEligibleForLoan
+    func createLoan(for member: Member, amount: Double, repaymentMonths: Int, issueDate: Date = Date(), notes: String? = nil, wasOverridden: Bool = false, overrideReason: String? = nil, overriddenRules: [String] = []) throws -> Loan {
+        // Skip eligibility checks if admin override is active
+        if !wasOverridden {
+            guard member.isEligibleForLoan else {
+                throw DataManagerError.memberNotEligibleForLoan
+            }
+
+            guard amount <= member.maximumLoanAmount else {
+                throw DataManagerError.loanAmountExceedsLimit
+            }
         }
-        
-        guard amount <= member.maximumLoanAmount else {
-            throw DataManagerError.loanAmountExceedsLimit
-        }
-        
+
         let loan = Loan(context: context)
         loan.loanID = UUID()
         loan.member = member
@@ -195,26 +198,37 @@ class DataManager: ObservableObject {
         loan.loanStatus = .active
         loan.createdAt = Date()
         loan.updatedAt = Date()
-        
+
+        // Set override fields
+        loan.wasOverridden = wasOverridden
+        loan.overrideReason = overrideReason
+
         _ = createTransaction(
             for: member,
             amount: -amount,
             type: .loanDisbursement,
-            description: "Loan disbursement of KSH \(Int(amount))"
+            description: "Loan disbursement of KSH \(Int(amount))\(wasOverridden ? " [OVERRIDE]" : "")"
         )
-        
+
         saveContext()
         fetchActiveLoans()
-        
-        // Audit log
+
+        // Audit log - include override information
+        var auditDetails = "Loan of \(CurrencyFormatter.shared.format(amount)) for \(repaymentMonths) months"
+        if wasOverridden {
+            auditDetails += " [ADMIN OVERRIDE: \(overrideReason ?? "No reason provided")]"
+            if !overriddenRules.isEmpty {
+                auditDetails += " Rules overridden: \(overriddenRules.joined(separator: ", "))"
+            }
+        }
         AuditLogger.shared.log(
             event: .loanCreated,
-            details: "Loan of \(CurrencyFormatter.shared.format(amount)) for \(repaymentMonths) months",
+            details: auditDetails,
             amount: amount,
             memberID: member.memberID,
             loanID: loan.loanID
         )
-        
+
         return loan
     }
     
@@ -375,7 +389,8 @@ class DataManager: ObservableObject {
         
         do {
             let paymentsWithoutTransactions = try context.fetch(request)
-            print("🔍 Found \(paymentsWithoutTransactions.count) payments without transactions")
+            // Debug logging commented out
+            // print("🔍 Found \(paymentsWithoutTransactions.count) payments without transactions")
             
             for payment in paymentsWithoutTransactions {
                 let transactionType: TransactionType = payment.paymentType == .loanRepayment ? .loanRepayment : .contribution
@@ -413,10 +428,11 @@ class DataManager: ObservableObject {
         
         do {
             recentTransactions = try context.fetch(request)
-            print("📋 Fetched \(recentTransactions.count) recent transactions")
-            if let first = recentTransactions.first {
-                print("   Most recent: \(first.transactionType.displayName) - \(first.amount) on \(first.transactionDate ?? Date())")
-            }
+            // Debug logging commented out
+            // print("📋 Fetched \(recentTransactions.count) recent transactions")
+            // if let first = recentTransactions.first {
+            //     print("   Most recent: \(first.transactionType.displayName) - \(first.amount) on \(first.transactionDate ?? Date())")
+            // }
             
             // Post notification that transactions have been updated
             NotificationCenter.default.post(name: .transactionsUpdated, object: nil)
@@ -541,9 +557,10 @@ class DataManager: ObservableObject {
             // Refresh recent transactions
             fetchRecentTransactions()
             
-            print("✅ Recalculated balances for \(transactions.count) transactions")
-            print("   Final Fund Balance: \(currentFundBalance)")
-            print("   Final Loan Balance: \(currentLoanBalance)")
+            // Debug logging commented out
+            // print("✅ Recalculated balances for \(transactions.count) transactions")
+            // print("   Final Fund Balance: \(currentFundBalance)")
+            // print("   Final Loan Balance: \(currentLoanBalance)")
             
         } catch {
             print("Error recalculating transaction balances: \(error)")
@@ -553,7 +570,8 @@ class DataManager: ObservableObject {
     // MARK: - Transaction Reconciliation
     
     func reconcileAllTransactions() {
-        print("🔄 Starting transaction reconciliation...")
+        // Debug logging commented out to reduce console noise
+        // print("🔄 Starting transaction reconciliation...")
         
         // Fetch all transactions ordered by date
         let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
@@ -561,7 +579,7 @@ class DataManager: ObservableObject {
         
         do {
             let allTransactions = try context.fetch(request)
-            print("   Found \(allTransactions.count) transactions to reconcile")
+            // print("   Found \(allTransactions.count) transactions to reconcile")
             
             // Start with initial balances
             var runningFundBalance = fundSettings?.bobInitialInvestment ?? 100000
@@ -597,19 +615,21 @@ class DataManager: ObservableObject {
                 transaction.reconciled = true
                 transaction.reconciledDate = Date()
                 
-                print("   [\(index + 1)/\(allTransactions.count)] \(transaction.transactionType.displayName): \(transaction.amount)")
-                print("      Fund: \(transaction.previousBalance ?? 0) -> \(transaction.balance)")
-                print("      Loans: \(transaction.loanBalance)")
+                // Verbose transaction logging commented out
+                // print("   [\(index + 1)/\(allTransactions.count)] \(transaction.transactionType.displayName): \(transaction.amount)")
+                // print("      Fund: \(transaction.previousBalance ?? 0) -> \(transaction.balance)")
+                // print("      Loans: \(transaction.loanBalance)")
             }
             
             saveContext()
-            print("✅ Reconciliation complete!")
-            print("   Final Fund Balance: \(runningFundBalance)")
-            print("   Final Loan Balance: \(runningLoanBalance)")
+            // Summary logging commented out
+            // print("✅ Reconciliation complete!")
+            // print("   Final Fund Balance: \(runningFundBalance)")
+            // print("   Final Loan Balance: \(runningLoanBalance)")
             
             // Verify against calculated balance
             let calculatedBalance = fundSettings?.calculateFundBalance() ?? 0
-            print("   Calculated Fund Balance: \(calculatedBalance)")
+            // print("   Calculated Fund Balance: \(calculatedBalance)")
             
             if abs(runningFundBalance - calculatedBalance) > 0.01 {
                 print("⚠️ WARNING: Reconciled balance doesn't match calculated balance!")

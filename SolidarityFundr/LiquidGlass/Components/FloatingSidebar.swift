@@ -14,8 +14,7 @@ enum SidebarSection: String, CaseIterable {
     case loans = "Loans"
     case payments = "Payments"
     case reports = "Reports"
-    case settings = "Settings"
-    
+
     var icon: String {
         switch self {
         case .overview: return "chart.line.uptrend.xyaxis"
@@ -23,10 +22,9 @@ enum SidebarSection: String, CaseIterable {
         case .loans: return "creditcard.fill"
         case .payments: return "dollarsign.circle.fill"
         case .reports: return "doc.text.fill"
-        case .settings: return "gear"
         }
     }
-    
+
     var color: Color {
         switch self {
         case .overview: return .blue
@@ -34,7 +32,6 @@ enum SidebarSection: String, CaseIterable {
         case .loans: return .orange
         case .payments: return .purple
         case .reports: return .pink
-        case .settings: return .gray
         }
     }
 }

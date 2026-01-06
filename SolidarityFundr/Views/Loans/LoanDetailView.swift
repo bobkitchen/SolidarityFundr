@@ -12,6 +12,7 @@ struct LoanDetailView: View {
     @ObservedObject var loan: Loan
     @StateObject private var viewModel = LoanViewModel()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openMemberWindow) private var openMemberWindow
     @State private var selectedTab = 0
     @State private var showingPaymentForm = false
     @State private var showingCompleteLoanConfirmation = false
@@ -199,7 +200,9 @@ struct LoanDetailView: View {
                 icon: "person.fill",
                 color: .blue
             ) {
-                // TODO: Navigate to member
+                if let memberID = loan.member?.memberID {
+                    openMemberWindow(memberID)
+                }
             }
             
             if loan.isOverdue {

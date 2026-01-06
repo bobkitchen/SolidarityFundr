@@ -12,6 +12,7 @@ struct MemberDetailView: View {
     @ObservedObject var member: Member
     @StateObject private var viewModel = MemberViewModel()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openLoanWindow) private var openLoanWindow
     @State private var selectedTab = 0
     @State private var showingEditSheet = false
     @State private var showingCashOutConfirmation = false
@@ -281,7 +282,7 @@ struct MemberDetailView: View {
     private var loansTab: some View {
         VStack(spacing: 16) {
             let loans = viewModel.getMemberLoanHistory(for: member)
-            
+
             if loans.isEmpty {
                 ContentUnavailableView(
                     "No Loans",
@@ -291,7 +292,14 @@ struct MemberDetailView: View {
                 .frame(height: 200)
             } else {
                 ForEach(loans) { loan in
-                    LoanCard(loan: loan)
+                    Button {
+                        if let loanID = loan.loanID {
+                            openLoanWindow(loanID)
+                        }
+                    } label: {
+                        LoanCard(loan: loan)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -689,7 +697,7 @@ struct EditMemberSheet: View {
     @ObservedObject var member: Member
     @ObservedObject var viewModel: MemberViewModel
     @Environment(\.dismiss) private var dismiss
-    
+
     @State private var name: String = ""
     @State private var role: MemberRole = .partTime
     @State private var email: String = ""
@@ -697,6 +705,13 @@ struct EditMemberSheet: View {
     @State private var joinDate = Date()
     @State private var smsOptIn: Bool = false
     @State private var showingPhoneError = false
+
+    // Custom override fields
+    @State private var hasCustomLoanLimit: Bool = false
+    @State private var customLoanLimitString: String = ""
+    @State private var hasCustomRepaymentTerms: Bool = false
+    @State private var allowedRepaymentMonths: Set<Int> = []
+    @State private var overrideReason: String = ""
     
     var body: some View {
         NavigationStack {
@@ -757,6 +772,90 @@ struct EditMemberSheet: View {
                     DatePicker("Start Date", selection: $joinDate, displayedComponents: .date)
                         .datePickerStyle(.compact)
                 }
+
+                // Loan Override Settings Section
+                Section {
+                    Toggle("Custom Loan Limit", isOn: $hasCustomLoanLimit)
+
+                    if hasCustomLoanLimit {
+                        HStack {
+                            Text("KSH")
+                            TextField("Amount", text: $customLoanLimitString)
+                                .multilineTextAlignment(.trailing)
+                                #if os(iOS)
+                                .keyboardType(.numberPad)
+                                #endif
+                        }
+
+                        // Show default limit for reference
+                        HStack {
+                            Text("Standard limit for \(role.displayName):")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(CurrencyFormatter.shared.format(standardLimitForRole(role)))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Toggle("Custom Repayment Terms", isOn: $hasCustomRepaymentTerms)
+
+                    if hasCustomRepaymentTerms {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Allowed repayment periods:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            HStack(spacing: 12) {
+                                ForEach([3, 4, 6], id: \.self) { months in
+                                    Toggle("\(months) mo", isOn: Binding(
+                                        get: { allowedRepaymentMonths.contains(months) },
+                                        set: { isOn in
+                                            if isOn {
+                                                allowedRepaymentMonths.insert(months)
+                                            } else {
+                                                allowedRepaymentMonths.remove(months)
+                                            }
+                                        }
+                                    ))
+                                    .toggleStyle(.button)
+                                    .buttonStyle(.bordered)
+                                    .tint(allowedRepaymentMonths.contains(months) ? .blue : .secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    if hasCustomLoanLimit || hasCustomRepaymentTerms {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Reason for override:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            TextField("e.g., Board approved exception", text: $overrideReason)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        if member.overrideApprovedDate != nil {
+                            HStack {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundColor(.blue)
+                                Text("Override approved: \(member.overrideApprovedDate!, style: .date)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Loan Override Settings")
+                        Image(systemName: "exclamationmark.shield")
+                            .foregroundColor(.orange)
+                    }
+                } footer: {
+                    Text("Override settings allow this member to borrow beyond standard limits or use different repayment periods.")
+                        .font(.caption)
+                }
             }
             .navigationTitle("Edit Member")
                 .toolbar {
@@ -774,6 +873,30 @@ struct EditMemberSheet: View {
                         member.phoneNumber = phone.isEmpty ? nil : phone
                         member.smsOptIn = smsOptIn && PhoneNumberValidator.validate(phone)
                         member.joinDate = joinDate
+
+                        // Save override settings
+                        if hasCustomLoanLimit, let limit = Double(customLoanLimitString), limit > 0 {
+                            member.customLoanLimit = limit
+                        } else {
+                            member.customLoanLimit = 0
+                        }
+
+                        if hasCustomRepaymentTerms && !allowedRepaymentMonths.isEmpty {
+                            member.customRepaymentMonths = allowedRepaymentMonths.sorted().map { String($0) }.joined(separator: ",")
+                        } else {
+                            member.customRepaymentMonths = nil
+                        }
+
+                        if hasCustomLoanLimit || hasCustomRepaymentTerms {
+                            member.overrideReason = overrideReason.isEmpty ? nil : overrideReason
+                            if member.overrideApprovedDate == nil {
+                                member.overrideApprovedDate = Date()
+                            }
+                        } else {
+                            member.overrideReason = nil
+                            member.overrideApprovedDate = nil
+                        }
+
                         viewModel.updateMember()
                         dismiss()
                     }
@@ -788,6 +911,32 @@ struct EditMemberSheet: View {
             phone = member.phoneNumber ?? ""
             smsOptIn = member.smsOptIn
             joinDate = member.joinDate ?? Date()
+
+            // Load override settings
+            hasCustomLoanLimit = member.customLoanLimit > 0
+            customLoanLimitString = member.customLoanLimit > 0 ? String(Int(member.customLoanLimit)) : ""
+
+            if let customMonths = member.customRepaymentMonths, !customMonths.isEmpty {
+                hasCustomRepaymentTerms = true
+                allowedRepaymentMonths = Set(customMonths.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) })
+            } else {
+                hasCustomRepaymentTerms = false
+                allowedRepaymentMonths = []
+            }
+
+            overrideReason = member.overrideReason ?? ""
+        }
+    }
+
+    // Helper function to get standard loan limit for a role
+    private func standardLimitForRole(_ role: MemberRole) -> Double {
+        switch role {
+        case .driver, .assistant:
+            return 40000
+        case .housekeeper, .groundsKeeper:
+            return 19000
+        case .securityGuard, .partTime:
+            return 10000
         }
     }
 }

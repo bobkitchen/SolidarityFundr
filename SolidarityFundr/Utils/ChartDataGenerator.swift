@@ -55,10 +55,11 @@ class ChartDataGenerator {
         let startingFundBalance = lastTransactionBefore?.balance ?? (FundSettings.fetchOrCreate(in: context).bobInitialInvestment)
         let startingLoanBalance = lastTransactionBefore?.loanBalance ?? 0
         
-        print("📊 Chart Data Generator - Period: \(period)")
-        print("   - Transactions in period: \(transactions.count)")
-        print("   - Starting Fund Balance: \(startingFundBalance)")
-        print("   - Starting Loan Balance: \(startingLoanBalance)")
+        // Debug logging commented out to reduce console noise
+        // print("📊 Chart Data Generator - Period: \(period)")
+        // print("   - Transactions in period: \(transactions.count)")
+        // print("   - Starting Fund Balance: \(startingFundBalance)")
+        // print("   - Starting Loan Balance: \(startingLoanBalance)")
         
         // Generate data points
         var fundDataPoints: [(date: Date, value: Double)] = []
@@ -114,8 +115,9 @@ class ChartDataGenerator {
         fundDataPoints.sort { $0.date < $1.date }
         loanDataPoints.sort { $0.date < $1.date }
         
-        print("   - Generated \(fundDataPoints.count) fund balance data points")
-        print("   - Generated \(loanDataPoints.count) loan balance data points")
+        // Debug logging commented out to reduce console noise
+        // print("   - Generated \(fundDataPoints.count) fund balance data points")
+        // print("   - Generated \(loanDataPoints.count) loan balance data points")
         
         return (fundBalance: fundDataPoints, loanBalance: loanDataPoints)
     }

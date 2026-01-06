@@ -10,9 +10,12 @@ import Combine
 
 struct LoansListView: View {
     @StateObject private var viewModel = LoanViewModel()
-    @State private var selectedLoan: Loan?
     @State private var showingNewLoan = false
     @State private var cancellables = Set<AnyCancellable>()
+
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     
     var body: some View {
         VStack(spacing: 0) {
@@ -34,11 +37,6 @@ struct LoansListView: View {
         .sheet(isPresented: $showingNewLoan) {
             NewLoanSheet()
         }
-        .sheet(item: $selectedLoan) { loan in
-            NavigationStack {
-                LoanDetailView(loan: loan)
-            }
-        }
         .alert("Error", isPresented: $viewModel.showingError) {
             Button("OK") {
                 viewModel.showingError = false
@@ -56,9 +54,17 @@ struct LoansListView: View {
                 .store(in: &cancellables)
         }
     }
-    
+
+    private func openLoanDetail(_ loan: Loan) {
+        #if os(macOS)
+        if let loanID = loan.loanID {
+            openWindow(id: "loan-detail", value: loanID)
+        }
+        #endif
+    }
+
     // MARK: - View Components
-    
+
     private var fundStatusHeader: some View {
         VStack(spacing: 12) {
             // Clean header matching Overview style
@@ -207,7 +213,7 @@ struct LoansListView: View {
         List {
             ForEach(viewModel.filteredLoans) { loan in
                 LoanRowView(loan: loan) {
-                    selectedLoan = loan
+                    openLoanDetail(loan)
                 }
             }
         }
@@ -376,12 +382,16 @@ struct NewLoanSheet: View {
                                 
                                 // Repayment Period
                                 Picker("Repayment Period", selection: $viewModel.repaymentMonths) {
-                                    if let member = viewModel.selectedMember,
-                                       (member.memberRole == .securityGuard || member.memberRole == .partTime) {
-                                        Text("6 Months").tag(6)
-                                    } else {
+                                    if viewModel.adminOverrideEnabled {
+                                        // When override is enabled, show all options
                                         Text("3 Months").tag(3)
                                         Text("4 Months").tag(4)
+                                        Text("6 Months").tag(6)
+                                    } else if let member = viewModel.selectedMember {
+                                        // Show member's allowed repayment months
+                                        ForEach(member.allowedRepaymentMonths, id: \.self) { months in
+                                            Text("\(months) Months").tag(months)
+                                        }
                                     }
                                 }
                                 .onChange(of: viewModel.repaymentMonths) { _ in
@@ -390,10 +400,9 @@ struct NewLoanSheet: View {
                                 .onChange(of: viewModel.selectedMember) { _ in
                                     // Reset repayment months when member changes
                                     if let member = viewModel.selectedMember {
-                                        if member.memberRole == .securityGuard || member.memberRole == .partTime {
-                                            viewModel.repaymentMonths = 6
-                                        } else {
-                                            viewModel.repaymentMonths = 3
+                                        // Use the first allowed repayment month for this member
+                                        if let firstAllowed = member.allowedRepaymentMonths.first {
+                                            viewModel.repaymentMonths = firstAllowed
                                         }
                                         viewModel.calculateLoanDetails()
                                     }
@@ -412,7 +421,50 @@ struct NewLoanSheet: View {
                             TextEditor(text: $viewModel.loanNotes)
                                 .frame(minHeight: 60)
                         }
-                        
+
+                        // Admin Override Section
+                        Section {
+                            Toggle("Admin Override", isOn: $viewModel.adminOverrideEnabled)
+
+                            if viewModel.adminOverrideEnabled {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Override allows bypassing loan limits and repayment period restrictions. A reason is required for audit purposes.")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+
+                                    TextField("Reason for override (required)", text: $viewModel.overrideReason)
+                                        .textFieldStyle(.roundedBorder)
+
+                                    if let member = viewModel.selectedMember {
+                                        HStack {
+                                            Text("Standard limit:")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                            Text(CurrencyFormatter.shared.format(member.baseLoanLimit))
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        if member.hasCustomLoanLimit {
+                                            HStack {
+                                                Text("Custom limit:")
+                                                    .font(.caption)
+                                                    .foregroundColor(.blue)
+                                                Text(CurrencyFormatter.shared.format(member.customLoanLimit))
+                                                    .font(.caption)
+                                                    .foregroundColor(.blue)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } header: {
+                            HStack {
+                                Text("Admin Override")
+                                Image(systemName: "exclamationmark.shield")
+                                    .foregroundColor(.orange)
+                            }
+                        }
+
                         // Payment Schedule
                         if !viewModel.loanSchedule.isEmpty {
                             Section("Payment Schedule") {
@@ -468,7 +520,8 @@ struct NewLoanSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
                         viewModel.createLoan()
-                        if !viewModel.showingError {
+                        // Don't dismiss if there's an error OR if warning dialog is showing
+                        if !viewModel.showingError && !viewModel.showWarningDialog {
                             dismiss()
                         }
                     }
@@ -478,13 +531,25 @@ struct NewLoanSheet: View {
             .alert("Confirm Loan", isPresented: $viewModel.showWarningDialog) {
                 Button("Proceed") {
                     viewModel.proceedWithLoanCreation()
-                    if !viewModel.showingError {
-                        dismiss()
+                    // Check if loan was created successfully (warning dialog will be cleared)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if !viewModel.showWarningDialog && !viewModel.showingError {
+                            dismiss()
+                        }
                     }
                 }
-                Button("Cancel", role: .cancel) {}
+                Button("Cancel", role: .cancel) {
+                    // User cancelled loan due to warnings
+                }
             } message: {
                 Text(viewModel.validationWarnings.joined(separator: "\n\n"))
+            }
+            .alert("Error", isPresented: $viewModel.showingError) {
+                Button("OK") {
+                    viewModel.showingError = false
+                }
+            } message: {
+                Text(viewModel.errorMessage ?? "An error occurred while creating the loan")
             }
         }
     }

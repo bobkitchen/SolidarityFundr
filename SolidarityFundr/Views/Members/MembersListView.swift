@@ -9,19 +9,21 @@ import SwiftUI
 
 struct MembersListView: View {
     @StateObject private var viewModel = MemberViewModel()
-    @State private var selectedMember: Member?
     @State private var showingAddMember = false
-    @State private var showingMemberDetail = false
     @State private var searchText = ""
-    
+
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
+
     var body: some View {
         VStack(spacing: 0) {
             // Statistics Header
             memberStatisticsHeader
-            
+
             // Filter Bar
             filterBar
-            
+
             // Members List
             if viewModel.filteredMembers.isEmpty {
                 emptyStateView
@@ -34,11 +36,6 @@ struct MembersListView: View {
         .sheet(isPresented: $showingAddMember) {
             AddMemberSheet(viewModel: viewModel)
         }
-        .sheet(item: $selectedMember) { member in
-            NavigationStack {
-                MemberDetailView(member: member)
-            }
-        }
         .alert("Error", isPresented: $viewModel.showingError) {
             Button("OK") {
                 viewModel.showingError = false
@@ -46,6 +43,14 @@ struct MembersListView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
+    }
+
+    private func openMemberDetail(_ member: Member) {
+        #if os(macOS)
+        if let memberID = member.memberID {
+            openWindow(id: "member-detail", value: memberID)
+        }
+        #endif
     }
     
     // MARK: - View Components
@@ -190,11 +195,11 @@ struct MembersListView: View {
         List {
             ForEach(viewModel.filteredMembers) { member in
                 MemberRowView(member: member) {
-                    selectedMember = member
+                    openMemberDetail(member)
                 }
                 .contextMenu {
                     Button {
-                        selectedMember = member
+                        openMemberDetail(member)
                     } label: {
                         Label("View Details", systemImage: "person.text.rectangle")
                     }

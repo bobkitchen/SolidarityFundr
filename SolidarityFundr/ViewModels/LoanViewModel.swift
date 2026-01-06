@@ -31,6 +31,11 @@ class LoanViewModel: ObservableObject {
     @Published var loanNotes = ""
     @Published var loanSchedule: [LoanPaymentSchedule] = []
     @Published var loanIssueDate = Date()
+
+    // Admin override fields
+    @Published var adminOverrideEnabled = false
+    @Published var overrideReason = ""
+    @Published var overriddenRules: [String] = []
     
     // Fund status
     @Published var fundBalance: Double = 0
@@ -125,59 +130,94 @@ class LoanViewModel: ObservableObject {
     
     func createLoan() {
         clearError()
-        
+
         guard let member = selectedMember,
               let amount = Double(loanAmount) else {
             errorMessage = "Please select a member and enter a valid amount"
             showingError = true
+            print("❌ Loan creation failed - Member: \(selectedMember?.name ?? "nil"), Amount: \(loanAmount)")
             return
         }
-        
-        // Validate loan
+
+        // Require override reason if override is enabled
+        if adminOverrideEnabled && overrideReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errorMessage = "Please provide a reason for the override"
+            showingError = true
+            return
+        }
+
+        print("📄 Creating loan - Member: \(member.name ?? ""), Amount: \(amount), Months: \(repaymentMonths), Override: \(adminOverrideEnabled)")
+
+        // Validate loan with override flag
         let validation = businessRules.validateLoanRequest(
             member: member,
             amount: amount,
             repaymentMonths: repaymentMonths,
-            fundSettings: dataManager.fundSettings
+            fundSettings: dataManager.fundSettings,
+            adminOverride: adminOverrideEnabled
         )
-        
+
+        // Store overridden rules for audit logging
+        overriddenRules = validation.overriddenRules
+
         if !validation.isValid {
             errorMessage = validation.errorMessage
             showingError = true
+            print("❌ Loan validation failed: \(validation.errorMessage ?? "Unknown error")")
             return
         }
-        
+
         if validation.hasWarnings {
             validationWarnings = validation.warnings
             showWarningDialog = true
+            print("⚠️ Loan has warnings: \(validation.warnings.joined(separator: ", "))")
             return
         }
-        
+
         proceedWithLoanCreation()
     }
     
     func proceedWithLoanCreation() {
         guard let member = selectedMember,
-              let amount = Double(loanAmount) else { return }
-        
+              let amount = Double(loanAmount) else {
+            print("❌ proceedWithLoanCreation failed - No member or amount")
+            return
+        }
+
+        print("🚀 Proceeding with loan creation after warning confirmation")
+        print("   Member: \(member.name ?? ""), Max allowed: \(member.maximumLoanAmount)")
+        print("   Requested: \(amount), Current loans: \(member.totalActiveLoanBalance)")
+        if adminOverrideEnabled {
+            print("   ⚠️ ADMIN OVERRIDE ACTIVE - Reason: \(overrideReason)")
+            print("   Overridden rules: \(overriddenRules.joined(separator: ", "))")
+        }
+
         do {
             let loan = try dataManager.createLoan(
                 for: member,
                 amount: amount,
                 repaymentMonths: repaymentMonths,
                 issueDate: loanIssueDate,
-                notes: loanNotes.isEmpty ? nil : loanNotes
+                notes: loanNotes.isEmpty ? nil : loanNotes,
+                wasOverridden: adminOverrideEnabled,
+                overrideReason: adminOverrideEnabled ? overrideReason : nil,
+                overriddenRules: overriddenRules
             )
-            
+
             clearNewLoanForm()
-            showingNewLoan = false
+            // Don't set showingNewLoan here - let the view handle dismissal
             selectedLoan = loan
             showingLoanDetails = true
-            
+
+            // Clear the warning dialog since loan was created successfully
+            showWarningDialog = false
+
             updateFundStatus()
+            print("✅ Loan created successfully - ID: \(loan.loanID?.uuidString ?? ""), Override: \(loan.wasOverridden)")
         } catch {
             errorMessage = error.localizedDescription
             showingError = true
+            print("❌ Loan creation error: \(error.localizedDescription)")
         }
     }
     
@@ -249,6 +289,9 @@ class LoanViewModel: ObservableObject {
         loanNotes = ""
         loanSchedule = []
         validationWarnings = []
+        adminOverrideEnabled = false
+        overrideReason = ""
+        overriddenRules = []
     }
     
     func prepareNewLoan() {

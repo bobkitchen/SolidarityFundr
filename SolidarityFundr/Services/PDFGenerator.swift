@@ -537,7 +537,7 @@ class PDFGenerator {
         let leftMargin: CGFloat = 40
         let rightMargin: CGFloat = 40
         let contentWidth = pageRect.width - leftMargin - rightMargin
-        
+
         // Section title
         let titleAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
@@ -546,15 +546,38 @@ class PDFGenerator {
         let title = "Active Loans (\(loans.count))"
         title.draw(at: CGPoint(x: leftMargin, y: currentY - 15), withAttributes: titleAttributes)
         currentY -= 25
-        
-        // Loan items
-        for loan in loans.prefix(5) {
-            currentY = drawLoanItem(loan: loan, width: contentWidth, at: CGPoint(x: leftMargin, y: currentY))
-            currentY -= 5
+
+        // Group loans by member
+        let loansByMember = Dictionary(grouping: loans) { loan -> String in
+            loan.member?.memberID?.uuidString ?? "unknown"
         }
-        
-        if loans.count > 5 {
-            let moreText = "... and \(loans.count - 5) more loans"
+
+        // Sort members by name for consistent ordering
+        let sortedMemberIDs = loansByMember.keys.sorted { id1, id2 in
+            let name1 = loansByMember[id1]?.first?.member?.name ?? ""
+            let name2 = loansByMember[id2]?.first?.member?.name ?? ""
+            return name1 < name2
+        }
+
+        // Draw each member's loans
+        var membersDrawn = 0
+        for memberID in sortedMemberIDs {
+            guard let memberLoans = loansByMember[memberID],
+                  let firstLoan = memberLoans.first,
+                  let member = firstLoan.member else { continue }
+
+            // Limit to avoid overly long reports
+            if membersDrawn >= 10 { break }
+
+            currentY = drawMemberLoansGroup(member: member, loans: memberLoans, width: contentWidth, at: CGPoint(x: leftMargin, y: currentY))
+            currentY -= 10
+            membersDrawn += 1
+        }
+
+        // Show "more" message if truncated
+        let totalMembers = sortedMemberIDs.count
+        if totalMembers > 10 {
+            let moreText = "... and \(totalMembers - 10) more members with active loans"
             let moreAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 9),
                 .foregroundColor: NSColor.darkGray
@@ -562,37 +585,67 @@ class PDFGenerator {
             moreText.draw(at: CGPoint(x: leftMargin + 10, y: currentY - 12), withAttributes: moreAttributes)
             currentY -= 20
         }
-        
+
         return currentY
     }
-    
-    private func drawLoanItem(loan: Loan, width: CGFloat, at point: CGPoint) -> CGFloat {
-        let memberName = loan.member?.name ?? "Unknown"
-        let percentage = loan.amount > 0 ? ((loan.amount - loan.balance) / loan.amount) * 100 : 0
-        
-        // Member name - Line 1
-        let nameAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+
+    private func drawMemberLoansGroup(member: Member, loans: [Loan], width: CGFloat, at point: CGPoint) -> CGFloat {
+        var currentY = point.y
+
+        // Member name header
+        let memberNameAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        
-        let nameText = "\(memberName):"
-        nameText.draw(at: point, withAttributes: nameAttributes)
-        
-        // Loan details - Line 2 (below name)
+
+        // Calculate total balance for this member
+        let totalBalance = loans.reduce(0) { $0 + $1.balance }
+        let memberText = "\(member.name ?? "Unknown") (\(loans.count) loan\(loans.count == 1 ? "" : "s") - Total: \(CurrencyFormatter.shared.format(totalBalance)))"
+        memberText.draw(at: CGPoint(x: point.x, y: currentY - 12), withAttributes: memberNameAttributes)
+        currentY -= 28  // Increased spacing after member header
+
+        // Draw each loan for this member (indented)
+        for loan in loans {
+            currentY = drawLoanItem(loan: loan, width: width, at: CGPoint(x: point.x + 15, y: currentY), showMemberName: false)
+            currentY -= 6  // Increased spacing between loans
+        }
+
+        return currentY
+    }
+
+    private func drawLoanItem(loan: Loan, width: CGFloat, at point: CGPoint, showMemberName: Bool = true) -> CGFloat {
+        let percentage = loan.amount > 0 ? ((loan.amount - loan.balance) / loan.amount) * 100 : 0
+
+        // Loan details line
         let detailAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 9),
             .foregroundColor: NSColor.darkGray
         ]
-        
-        let amountText = "Loan: \(CurrencyFormatter.shared.format(loan.amount)) | Balance: \(CurrencyFormatter.shared.format(loan.balance))"
-        amountText.draw(at: CGPoint(x: point.x + 10, y: point.y - 14), withAttributes: detailAttributes)
-        
+
+        var loanText = ""
+        if showMemberName {
+            let memberName = loan.member?.name ?? "Unknown"
+            loanText = "\(memberName): "
+        }
+
+        // Add issue date and due date for context
+        let issueDateStr = loan.issueDate != nil ? DateFormatter.shortDate.string(from: loan.issueDate!) : "N/A"
+        let dueDateStr = loan.dueDate != nil ? DateFormatter.shortDate.string(from: loan.dueDate!) : "N/A"
+
+        loanText += "\(CurrencyFormatter.shared.format(loan.amount)) → Balance: \(CurrencyFormatter.shared.format(loan.balance)) (Due: \(dueDateStr))"
+
+        // Check if loan was overridden
+        if loan.wasOverridden {
+            loanText += " ⚠️"
+        }
+
+        loanText.draw(at: point, withAttributes: detailAttributes)
+
         // Progress bar - positioned to the right
-        let progressX = point.x + 320
+        let progressX = point.x + 300
         let progressWidth: CGFloat = 80
-        let progressHeight: CGFloat = 10
-        let progressY = point.y - 7  // Center between two lines
+        let progressHeight: CGFloat = 8
+        let progressY = point.y - 2
         
         let context = NSGraphicsContext.current?.cgContext
         
@@ -636,13 +689,13 @@ class PDFGenerator {
         
         // Percentage text
         let percentAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+            .font: NSFont.systemFont(ofSize: 8, weight: .medium),
             .foregroundColor: NSColor.black
         ]
         let percentText = String(format: "%.0f%%", percentage)
-        percentText.draw(at: CGPoint(x: progressX + progressWidth + 5, y: point.y - 7), withAttributes: percentAttributes)
-        
-        return point.y - 25  // Account for two-line layout
+        percentText.draw(at: CGPoint(x: progressX + progressWidth + 5, y: point.y - 2), withAttributes: percentAttributes)
+
+        return point.y - 14  // Single line layout
     }
     
     private func calculateRemainingMonths(for loan: Loan) -> Int {
@@ -970,6 +1023,12 @@ extension DateFormatter {
     static let mediumDate: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
+        return formatter
+    }()
+
+    static let shortDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM/yy"
         return formatter
     }()
 }

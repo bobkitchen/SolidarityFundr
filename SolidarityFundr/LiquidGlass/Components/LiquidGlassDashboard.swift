@@ -243,11 +243,16 @@ struct MiniChart: View {
     }
     
     private func generateRandomPoints(in size: CGSize) -> [CGPoint] {
+        // Guard against invalid size
+        guard size.width > 0 && size.height > 0 else {
+            return [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 10)]
+        }
+        
         let count = 10
         return (0..<count).map { i in
             let x = size.width * CGFloat(i) / CGFloat(count - 1)
             let y = size.height * (0.2 + CGFloat.random(in: 0...0.6))
-            return CGPoint(x: x, y: y)
+            return CGPoint(x: x.isFinite ? x : 0, y: y.isFinite ? y : 0)
         }
     }
 }
@@ -278,12 +283,17 @@ struct ActivityChartCard: View {
     }
     
     private func calculateChartDomain(min: Double, max: Double, padding: Double) -> ClosedRange<Double> {
+        // Ensure all values are finite
+        let safeMin = min.isFinite ? min : 0
+        let safeMax = max.isFinite ? max : 100000
+        let safePadding = padding.isFinite && padding > 0 ? padding : 1000
+        
         // Calculate safe chart bounds
-        let chartMin = Swift.min(min - padding, 0)
-        let chartMax = Swift.max(max + padding, chartMin + 10000)
+        let chartMin = Swift.min(safeMin - safePadding, 0)
+        let chartMax = Swift.max(safeMax + safePadding, chartMin + 10000)
         
         // Ensure we have a valid range
-        if chartMin >= chartMax {
+        if !chartMin.isFinite || !chartMax.isFinite || chartMin >= chartMax {
             return 0...100000
         }
         

@@ -1475,26 +1475,37 @@ struct SettingsRow<Content: View>: View {
 
 struct ExportDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
-    
+
     let dataManager: DataManager
     var jsonData: Data
-    
+    var exportError: Error?
+
     init(dataManager: DataManager) {
         self.dataManager = dataManager
         do {
             self.jsonData = try DataImportExport.shared.exportData()
+            self.exportError = nil
         } catch {
             self.jsonData = Data()
-            // Export error occurred
+            self.exportError = error
+            print("❌ Export failed: \(error.localizedDescription)")
         }
     }
-    
+
     init(configuration: ReadConfiguration) throws {
         self.dataManager = DataManager.shared
         self.jsonData = configuration.file.regularFileContents ?? Data()
+        self.exportError = nil
     }
-    
+
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        if let error = exportError {
+            throw error
+        }
+        if jsonData.isEmpty {
+            throw NSError(domain: "ExportDocument", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "No data to export. The database may be empty or inaccessible."])
+        }
         return FileWrapper(regularFileWithContents: jsonData)
     }
 }

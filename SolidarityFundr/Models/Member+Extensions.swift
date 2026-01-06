@@ -44,15 +44,61 @@ extension Member {
         return totalContributions - totalActiveLoanBalance
     }
     
-    var loanLimit: Double {
+    /// The base loan limit based on role (before any custom override)
+    var baseLoanLimit: Double {
         switch memberRole {
         case .driver, .assistant:
             return 40000
         case .housekeeper, .groundsKeeper:
             return 19000
         case .securityGuard, .partTime:
-            return 10000
+            // Guards and part-time staff can borrow up to their contributions, max 10,000
+            return min(totalContributions, 10000)
         }
+    }
+
+    /// The effective loan limit (uses custom limit if set, otherwise base limit)
+    var loanLimit: Double {
+        // If customLoanLimit is set and greater than 0, use it
+        if customLoanLimit > 0 {
+            return customLoanLimit
+        }
+        return baseLoanLimit
+    }
+
+    /// Whether this member has a custom loan limit override
+    var hasCustomLoanLimit: Bool {
+        return customLoanLimit > 0
+    }
+
+    /// Allowed repayment months for this member
+    var allowedRepaymentMonths: [Int] {
+        // Check for custom repayment months first
+        if let customMonths = customRepaymentMonths, !customMonths.isEmpty {
+            let months = customMonths.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            if !months.isEmpty {
+                return months.sorted()
+            }
+        }
+
+        // Default based on role
+        switch memberRole {
+        case .securityGuard, .partTime:
+            return [6]
+        default:
+            return [3, 4]
+        }
+    }
+
+    /// Whether this member has custom repayment terms
+    var hasCustomRepaymentTerms: Bool {
+        guard let customMonths = customRepaymentMonths, !customMonths.isEmpty else { return false }
+        return true
+    }
+
+    /// Whether this member has any override settings
+    var hasOverrideSettings: Bool {
+        return hasCustomLoanLimit || hasCustomRepaymentTerms
     }
     
     var monthsAsMember: Int {
