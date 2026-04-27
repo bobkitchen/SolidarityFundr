@@ -93,18 +93,13 @@ struct DashboardView: View {
             .listRowBackground(Color.clear)
 
             ForEach(Array(DashboardSection.allCases.enumerated()), id: \.element) { index, section in
-                // Tint only the leading icon (Apple's sidebar convention —
-                // Mail / Reminders / Finder do this). Tinting the title text
-                // breaks contrast against the selection highlight.
-                Label {
-                    Text(section.title)
-                } icon: {
-                    Image(systemName: section.systemImage)
-                        .foregroundStyle(section.tint)
-                }
-                .tag(Optional(section))
-                // ⌘1–5 to switch tabs.
-                .keyboardShortcutForSidebarIndex(index, action: { selection = section })
+                // Default sidebar styling — system handles selection contrast
+                // automatically. Per-section character lives in the detail
+                // pages (page tints, brand colors), not the sidebar chrome.
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(Optional(section))
+                    // ⌘1–5 to switch tabs.
+                    .keyboardShortcutForSidebarIndex(index, action: { selection = section })
             }
 
             Section("Fund Status") {
