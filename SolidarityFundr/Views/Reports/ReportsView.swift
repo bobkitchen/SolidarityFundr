@@ -21,7 +21,6 @@ struct ReportsView: View {
     @State private var isGeneratingPDF = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    @State private var refreshID = UUID()
     @State private var showingNotificationHistory = false
     @State private var showingBatchStatement = false
     @State private var hasRecalculated = false
@@ -124,19 +123,6 @@ struct ReportsView: View {
                     hasRecalculated = true
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
-                refreshID = UUID()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
-                refreshID = UUID()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
-                refreshID = UUID()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
-                refreshID = UUID()
-            }
-            .id(refreshID)
         }
     }
     

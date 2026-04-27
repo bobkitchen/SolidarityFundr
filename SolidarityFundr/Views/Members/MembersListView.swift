@@ -12,7 +12,6 @@ struct MembersListView: View {
     @StateObject private var viewModel = MemberViewModel()
     @State private var showingAddMember = false
     @State private var searchText = ""
-    @State private var refreshID = UUID()
 
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
@@ -69,17 +68,13 @@ struct MembersListView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
                 viewModel.loadMembers()
-                refreshID = UUID()
             }
             .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
                 viewModel.loadMembers()
-                refreshID = UUID()
             }
             .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
                 viewModel.loadMembers()
-                refreshID = UUID()
             }
-            .id(refreshID)
         }
     }
 

@@ -19,10 +19,6 @@ struct SolidarityFundrApp: App {
     @StateObject private var dataManager = DataManager.shared
     @StateObject private var authManager = AuthenticationManager.shared
 
-    #if os(macOS)
-    @NSApplicationDelegateAdaptor(WindowConfigurator.self) private var windowConfigurator
-    #endif
-
     var body: some Scene {
         // MARK: - Main Window
         WindowGroup {
@@ -57,11 +53,12 @@ struct SolidarityFundrApp: App {
             #endif
         }
         #if os(macOS)
-        // Keep the title bar (so traffic lights have a proper frame anchor) but
-        // make it transparent and full-size-content via WindowConfigurator.
-        // `.hiddenTitleBar` removes the chrome that anchors traffic lights.
+        // Stock window. SwiftUI + NavigationSplitView handle title-bar / toolbar
+        // chrome and Liquid Glass on macOS 26 automatically. No NSWindow surgery
+        // needed — the previous WindowConfigurator forced `.fullSizeContentView`
+        // which let the sidebar selection highlight bleed under the title bar.
         .windowStyle(.titleBar)
-        .windowToolbarStyle(.unifiedCompact)
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {
