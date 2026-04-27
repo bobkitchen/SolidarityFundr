@@ -89,30 +89,37 @@ struct MembersListView: View {
     // MARK: - View Components
     
     private var memberStatisticsHeader: some View {
-        // Compact stat strip — title and date were redundant with .navigationTitle.
-        HStack(spacing: 16) {
-            MiniMetricCard(
-                title: "Active Members",
-                value: "\(viewModel.activeMembersCount)",
-                systemImage: "person.fill.checkmark",
-                tint: .green
-            )
-            MiniMetricCard(
-                title: "Total Contributions",
-                value: viewModel.formatCurrency(viewModel.totalContributions),
-                systemImage: "banknote.fill",
-                tint: .blue
-            )
-            MiniMetricCard(
-                title: "Members with Loans",
-                value: "\(viewModel.members.filter { $0.hasActiveLoans }.count)",
-                systemImage: "creditcard.fill",
-                tint: .orange
-            )
+        VStack(alignment: .leading, spacing: 12) {
+            // Editorial page heading. e.g. "Five members" — the count
+            // becomes the title; reads warm, not corporate.
+            Text("\(spelledCount(viewModel.activeMembersCount)) Members")
+                .font(.system(.title, design: .serif))
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 16) {
+                MiniMetricCard(
+                    title: "Total Contributions",
+                    value: viewModel.formatCurrency(viewModel.totalContributions),
+                    systemImage: "banknote",
+                    tint: BrandColor.olive
+                )
+                MiniMetricCard(
+                    title: "With Active Loans",
+                    value: "\(viewModel.members.filter { $0.hasActiveLoans }.count)",
+                    systemImage: "creditcard",
+                    tint: BrandColor.honey
+                )
+            }
         }
         .padding(.horizontal)
         .padding(.top, 8)
         .padding(.bottom, 12)
+    }
+
+    private func spelledCount(_ n: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        return (formatter.string(from: NSNumber(value: n)) ?? "\(n)").capitalized
     }
     
     private var filterBar: some View {

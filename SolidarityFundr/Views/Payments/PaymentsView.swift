@@ -94,30 +94,34 @@ struct PaymentsView: View {
     // MARK: - View Components
     
     private var paymentSummaryHeader: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(paymentsHeadline)
+                .font(.system(.title, design: .serif))
+                .foregroundStyle(.primary)
+
             HStack(spacing: 16) {
                 MiniMetricCard(
-                    title: "Total Payments",
+                    title: "Total",
                     value: viewModel.formatCurrency(viewModel.paymentSummary.totalAmount),
-                    systemImage: "dollarsign.circle.fill",
-                    tint: .green
+                    systemImage: "dollarsign.circle",
+                    tint: BrandColor.terracotta
                 )
                 MiniMetricCard(
                     title: "Contributions",
                     value: viewModel.formatCurrency(viewModel.paymentSummary.totalContributions),
-                    systemImage: "banknote.fill",
-                    tint: .blue
+                    systemImage: "banknote",
+                    tint: BrandColor.avocado
                 )
                 MiniMetricCard(
                     title: "Loan Repayments",
                     value: viewModel.formatCurrency(viewModel.paymentSummary.totalLoanRepayments),
-                    systemImage: "creditcard.fill",
-                    tint: .orange
+                    systemImage: "creditcard",
+                    tint: BrandColor.honey
                 )
             }
 
             HStack(spacing: 16) {
-                Label("\(viewModel.paymentSummary.paymentCount) payments", systemImage: "number.circle.fill")
+                Label("\(viewModel.paymentSummary.paymentCount) payments", systemImage: "number.circle")
                 if viewModel.paymentSummary.paymentCount > 0 {
                     Label("Avg \(viewModel.formatCurrency(viewModel.paymentSummary.averagePayment))",
                           systemImage: "chart.line.uptrend.xyaxis")
@@ -130,6 +134,15 @@ struct PaymentsView: View {
         .padding(.horizontal)
         .padding(.top, 8)
         .padding(.bottom, 12)
+    }
+
+    private var paymentsHeadline: String {
+        let count = viewModel.paymentSummary.paymentCount
+        if count == 0 { return "No Payments Yet" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        let spelled = (formatter.string(from: NSNumber(value: count)) ?? "\(count)").capitalized
+        return "\(spelled) \(count == 1 ? "Payment" : "Payments")"
     }
     
     private var dateRangeFilter: some View {

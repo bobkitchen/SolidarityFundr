@@ -91,9 +91,15 @@ struct CurrencyPill: View {
     let amount: Double
     var tint: Color = BrandColor.avocado
     var size: CGFloat = 28
+    /// `.rounded` for control-row currencies, `.serif` for editorial hero
+    /// numerics. Default rounded keeps numbers warm for inline use.
+    var design: Font.Design = .rounded
+    /// Numeric weight. Serif looks best around `.regular`–`.medium`; rounded
+    /// usually wants `.semibold`.
+    var weight: Font.Weight = .semibold
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("KSH")
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 8)
@@ -102,7 +108,7 @@ struct CurrencyPill: View {
                 .foregroundStyle(tint)
 
             Text(amount, format: .number)
-                .font(.system(size: size, weight: .semibold, design: .rounded))
+                .font(.system(size: size, weight: weight, design: design))
                 .monospacedDigit()
         }
     }

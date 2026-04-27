@@ -88,36 +88,44 @@ struct LoansListView: View {
     // MARK: - View Components
 
     private var fundStatusHeader: some View {
-        // Compact stat strip with fund balance + utilization gauge inline.
-        HStack(spacing: 16) {
-            MiniMetricCard(
-                title: "Fund Balance",
-                value: viewModel.formatCurrency(viewModel.fundBalance),
-                systemImage: "banknote.fill",
-                tint: .green
-            )
-            MiniMetricCard(
-                title: "Active Loans",
-                value: "\(viewModel.activeLoans.count)",
-                systemImage: "creditcard.fill",
-                tint: .blue
-            )
-            MiniMetricCard(
-                title: "Outstanding",
-                value: viewModel.formatCurrency(viewModel.totalActiveLoansAmount),
-                systemImage: "dollarsign.circle.fill",
-                tint: .orange
-            )
-            MiniMetricCard(
-                title: "Overdue",
-                value: "\(viewModel.overdueLoans.count)",
-                systemImage: "exclamationmark.triangle.fill",
-                tint: viewModel.overdueLoans.isEmpty ? .green : .red
-            )
+        VStack(alignment: .leading, spacing: 12) {
+            Text(loansHeadline)
+                .font(.system(.title, design: .serif))
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 16) {
+                MiniMetricCard(
+                    title: "Fund Balance",
+                    value: viewModel.formatCurrency(viewModel.fundBalance),
+                    systemImage: "banknote",
+                    tint: BrandColor.avocado
+                )
+                MiniMetricCard(
+                    title: "Outstanding",
+                    value: viewModel.formatCurrency(viewModel.totalActiveLoansAmount),
+                    systemImage: "dollarsign.circle",
+                    tint: BrandColor.honey
+                )
+                MiniMetricCard(
+                    title: "Overdue",
+                    value: "\(viewModel.overdueLoans.count)",
+                    systemImage: "exclamationmark.triangle",
+                    tint: viewModel.overdueLoans.isEmpty ? BrandColor.avocado : BrandColor.rust
+                )
+            }
         }
         .padding(.horizontal)
         .padding(.top, 8)
         .padding(.bottom, 12)
+    }
+
+    private var loansHeadline: String {
+        let count = viewModel.activeLoans.count
+        if count == 0 { return "All Square" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        let spelled = (formatter.string(from: NSNumber(value: count)) ?? "\(count)").capitalized
+        return "\(spelled) Active \(count == 1 ? "Loan" : "Loans")"
     }
     
     private var filterBar: some View {
