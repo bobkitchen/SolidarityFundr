@@ -3,7 +3,7 @@
 //  SolidarityFundr
 //
 //  Created on 7/20/25.
-//  Floating overlay sidebar matching Transcriptly implementation
+//  Floating Liquid Glass Sidebar - macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
@@ -40,64 +40,89 @@ struct FloatingSidebar: View {
     @Binding var selectedSection: Int
     @Binding var isCollapsed: Bool
     @State private var hoveredSection: SidebarSection?
+    @State private var refreshID = UUID()
     @EnvironmentObject var dataManager: DataManager
-    
+
     // Convert Int to SidebarSection
     private var currentSection: SidebarSection {
         let sections = SidebarSection.allCases
         guard selectedSection < sections.count else { return .overview }
         return sections[selectedSection]
     }
-    
+
     var body: some View {
+        sidebarContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .liquidGlassSidebar()
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Navigation sidebar")
+            .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+                refreshID = UUID()
+            }
+            .id(refreshID)
+    }
+
+    @ViewBuilder
+    private var sidebarContent: some View {
         VStack(spacing: 0) {
             // Add space at the top for traffic lights
             Color.clear
                 .frame(height: 28)
                 .frame(maxHeight: 28)
-            
-            // Rest of your sidebar content
-            if !isCollapsed {
-                sidebarHeader
-                    .padding(.horizontal, 16)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-            }
-            
-            // Toggle button
-            HStack {
-                Spacer()
-                Button(action: toggleSidebar) {
-                    Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.leading")
-                        .font(.system(size: 12))
-                        .foregroundColor(.tertiaryText)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            
-            // Navigation items
-            VStack(spacing: 2) {
-                ForEach(SidebarSection.allCases, id: \.self) { section in
-                    sidebarItem(for: section)
-                }
-            }
-            .padding(.horizontal, 8)
-            
-            Spacer()
-            
-            // Fund status
-            if !isCollapsed {
-                fundStatusCard
+
+            // Rest of sidebar content wrapped in glass container for proper sampling
+            GlassContainerCompat {
+                VStack(spacing: 0) {
+                    if !isCollapsed {
+                        sidebarHeader
+                            .padding(.horizontal, 16)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
+
+                    // Toggle button
+                    HStack {
+                        Spacer()
+                        Button(action: toggleSidebar) {
+                            Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.leading")
+                                .font(.system(size: 12))
+                                .foregroundColor(.tertiaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibleControl(label: isCollapsed ? "Expand sidebar" : "Collapse sidebar")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                    // Navigation items
+                    VStack(spacing: 2) {
+                        ForEach(SidebarSection.allCases, id: \.self) { section in
+                            sidebarItem(for: section)
+                        }
+                    }
                     .padding(.horizontal, 8)
-                    .padding(.bottom, 12)
+
+                    Spacer()
+
+                    // Fund status
+                    if !isCollapsed {
+                        fundStatusCard
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 12)
+                    }
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DesignSystem.glassPrimary)
-        .cornerRadius(0) // Don't round corners - let window handle it
     }
-    
+
     @ViewBuilder
     private var sidebarHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -105,11 +130,12 @@ struct FloatingSidebar: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 40, height: 40)
-            
+                .accessibilityHidden(true)
+
             Text("Solidarity Fund")
                 .font(DesignSystem.Typography.cardTitle)
                 .foregroundColor(.primaryText)
-                
+
             Text("Parachichi House")
                 .font(DesignSystem.Typography.caption)
                 .foregroundColor(.secondaryText)
@@ -117,8 +143,10 @@ struct FloatingSidebar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Solidarity Fund, Parachichi House")
     }
-    
+
     @ViewBuilder
     private func sidebarItem(for section: SidebarSection) -> some View {
         Button(action: {
@@ -131,55 +159,54 @@ struct FloatingSidebar: View {
                     .foregroundColor(itemIconColor(for: section))
                     .frame(width: 20)
                     .frame(maxWidth: isCollapsed ? .infinity : nil)
-                
+
                 if !isCollapsed {
                     Text(section.rawValue)
                         .font(currentSection == section ? DesignSystem.Typography.navItemSelected : DesignSystem.Typography.navItem)
                         .foregroundColor(itemTextColor(for: section))
                         .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .leading)))
-                    
+
                     Spacer()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .padding(.horizontal, isCollapsed ? 8 : 12)
-            .background(itemBackground(for: section))
+            .background(
+                Group {
+                    if currentSection == section {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.thinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            )
+                    } else if hoveredSection == section {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    }
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering in
             hoveredSection = hovering ? section : nil
         }
-        .hoverOverlay(
-            isHovered: hoveredSection == section,
-            cornerRadius: DesignSystem.cornerRadiusXSmall,
-            intensity: 0.05
-        )
-        .cornerRadius(DesignSystem.cornerRadiusXSmall)
+        .accessibilityLabel(section.rawValue)
+        .accessibilityAddTraits(currentSection == section ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint("Navigate to \(section.rawValue)")
     }
-    
-    @ViewBuilder
-    private func itemBackground(for section: SidebarSection) -> some View {
-        if currentSection == section {
-            RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusXSmall)
-                .fill(Color.accentColor.opacity(0.15))
-        } else if hoveredSection == section {
-            RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusXSmall)
-                .fill(.quaternary)
-        } else {
-            Color.clear
-        }
-    }
-    
+
     private func itemIconColor(for section: SidebarSection) -> Color {
         return currentSection == section ? .accentColor : .secondaryText
     }
-    
+
     private func itemTextColor(for section: SidebarSection) -> Color {
         return currentSection == section ? .primaryText : .secondaryText
     }
-    
+
     @ViewBuilder
     private var fundStatusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -188,20 +215,20 @@ struct FloatingSidebar: View {
                 .foregroundColor(.tertiaryText)
                 .textCase(.uppercase)
                 .tracking(0.5)
-            
+
             VStack(spacing: 6) {
                 FundStatusRow(
                     label: "Balance",
                     value: formatCurrency(dataManager.fundSettings?.calculateFundBalance() ?? 0),
                     color: .green
                 )
-                
+
                 FundStatusRow(
                     label: "Utilization",
                     value: String(format: "%.1f%%", (dataManager.fundSettings?.calculateUtilizationPercentage() ?? 0) * 100),
                     color: utilizationColor(dataManager.fundSettings?.calculateUtilizationPercentage() ?? 0)
                 )
-                
+
                 FundStatusRow(
                     label: "Active Loans",
                     value: "\(dataManager.activeLoans.count)",
@@ -210,17 +237,15 @@ struct FloatingSidebar: View {
             }
         }
         .padding(12)
-        .performantGlass(
-            material: .thinMaterial,
-            cornerRadius: DesignSystem.cornerRadiusSmall,
-            strokeOpacity: 0.1
-        )
+        .tertiaryGlass(cornerRadius: DesignSystem.cornerRadiusSmall)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Fund status: Balance \(formatCurrency(dataManager.fundSettings?.calculateFundBalance() ?? 0)), \(dataManager.activeLoans.count) active loans")
     }
-    
+
     private func formatCurrency(_ amount: Double) -> String {
         CurrencyFormatter.shared.format(amount)
     }
-    
+
     private func utilizationColor(_ utilization: Double) -> Color {
         if utilization >= 0.6 {
             return .red
@@ -230,7 +255,7 @@ struct FloatingSidebar: View {
             return .green
         }
     }
-    
+
     private func toggleSidebar() {
         withAnimation(DesignSystem.gentleSpring) {
             isCollapsed.toggle()
@@ -239,11 +264,12 @@ struct FloatingSidebar: View {
 }
 
 // MARK: - Status Row
+
 private struct FundStatusRow: View {
     let label: String
     let value: String
     let color: Color
-    
+
     var body: some View {
         HStack {
             Text(label)

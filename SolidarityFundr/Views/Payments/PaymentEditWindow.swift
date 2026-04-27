@@ -43,8 +43,8 @@ struct PaymentEditWindow: View {
                 viewModel: viewModel,
                 editingPayment: payment,
                 onSave: {
+                    // Only call the onSave callback - window.close() is handled by the controller
                     onSave?()
-                    NSApp.keyWindow?.close()
                 }
             )
         }
@@ -64,7 +64,10 @@ struct PaymentFormViewWrapper: View {
             viewModel: viewModel,
             editingPayment: editingPayment
         )
-        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { notification in
+            if let savedPayment = notification.object as? Payment {
+                guard savedPayment.objectID == editingPayment.objectID else { return }
+            }
             onSave()
         }
     }
@@ -111,17 +114,21 @@ struct PaymentEditWindowController {
 class WindowManager {
     static let shared = WindowManager()
     private var windows: Set<NSWindow> = []
-    
+    private var observerTokens: [NSWindow: Any] = [:]
+
     func addWindow(_ window: NSWindow) {
         windows.insert(window)
-        
-        // Remove from set when window closes
-        NotificationCenter.default.addObserver(
+        let token = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
-        ) { _ in
-            self.windows.remove(window)
+        ) { [weak self] notification in
+            guard let self = self, let closedWindow = notification.object as? NSWindow else { return }
+            self.windows.remove(closedWindow)
+            if let token = self.observerTokens.removeValue(forKey: closedWindow) {
+                NotificationCenter.default.removeObserver(token)
+            }
         }
+        observerTokens[window] = token
     }
 }

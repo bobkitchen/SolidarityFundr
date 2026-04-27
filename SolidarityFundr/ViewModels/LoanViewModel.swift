@@ -98,10 +98,11 @@ class LoanViewModel: ObservableObject {
     }
     
     private func setupObservers() {
-        dataManager.$activeLoans
+        // Subscribe to all loans (not just active) to support filtering by status
+        dataManager.$allLoans
             .receive(on: DispatchQueue.main)
             .assign(to: &$loans)
-        
+
         dataManager.$fundSettings
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -109,10 +110,11 @@ class LoanViewModel: ObservableObject {
             }
             .store(in: &cancellables)
     }
-    
+
     func loadLoans() {
         isLoading = true
-        dataManager.fetchActiveLoans()
+        dataManager.fetchAllLoans()
+        dataManager.fetchActiveLoans() // Also refresh active loans for other parts of the app
         isLoading = false
     }
     

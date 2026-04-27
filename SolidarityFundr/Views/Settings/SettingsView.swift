@@ -162,84 +162,68 @@ struct SettingsView: View {
     // MARK: - View Components
     
     private var headerView: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.spacingSmall) {
-            Text("System Configuration")
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(.secondaryText)
-            
-            HStack {
-                Text("Settings")
-                    .font(DesignSystem.Typography.heroTitle)
-                    .fontWeight(.bold)
-                
-                Spacer()
-                
-                // Quick Actions with glass effect
-                HStack(spacing: DesignSystem.spacingMedium) {
-                    // Search Toggle
-                    SettingsQuickActionButton(
-                        icon: "magnifyingglass",
-                        isActive: isSearchActive,
-                        action: {
-                            isSearchActive.toggle()
-                            if !isSearchActive {
-                                searchText = ""
-                                searchResults = []
+        HStack {
+            Spacer()
+
+            // Quick Actions
+            HStack(spacing: DesignSystem.spacingMedium) {
+                // Search Toggle
+                SettingsQuickActionButton(
+                    icon: "magnifyingglass",
+                    isActive: isSearchActive,
+                    action: {
+                        isSearchActive.toggle()
+                        if !isSearchActive {
+                            searchText = ""
+                            searchResults = []
+                        }
+                    }
+                )
+                .help("Search settings")
+
+                // Quick Action Menu
+                Menu {
+                    Button {
+                        if let fundSettings = dataManager.fundSettings {
+                            let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
+                            if potentialInterest > 0 {
+                                dataManager.applyAnnualInterest()
+                                successMessage = "Annual interest applied successfully"
+                                showingSuccessAlert = true
                             }
-                        }
-                    )
-                    .help("Search settings")
-                    
-                    // Quick Action Menu
-                    Menu {
-                        Button {
-                            // Apply interest action
-                            if let fundSettings = dataManager.fundSettings {
-                                let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
-                                if potentialInterest > 0 {
-                                    dataManager.applyAnnualInterest()
-                                    successMessage = "Annual interest applied successfully"
-                                    showingSuccessAlert = true
-                                }
-                            }
-                        } label: {
-                            Label("Apply Annual Interest", systemImage: "percent")
-                        }
-                        
-                        Button {
-                            // Send test message
-                            selectedTab = .messaging
-                        } label: {
-                            Label("Send Test Message", systemImage: "message.badge.filled.fill")
-                        }
-                        
-                        Divider()
-                        
-                        Button {
-                            showingExport = true
-                        } label: {
-                            Label("Export Backup", systemImage: "square.and.arrow.up")
-                        }
-                        
-                        Button {
-                            showingImport = true
-                        } label: {
-                            Label("Import Data", systemImage: "square.and.arrow.down")
                         }
                     } label: {
-                        SettingsQuickActionButton(icon: "ellipsis.circle", isActive: false, action: {})
+                        Label("Apply Annual Interest", systemImage: "percent")
                     }
-                    .buttonStyle(.plain)
+
+                    Button {
+                        selectedTab = .messaging
+                    } label: {
+                        Label("Send Test Message", systemImage: "message.badge.filled.fill")
+                    }
+
+                    Divider()
+
+                    Button {
+                        showingExport = true
+                    } label: {
+                        Label("Export Backup", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
+                        showingImport = true
+                    } label: {
+                        Label("Import Data", systemImage: "square.and.arrow.down")
+                    }
+                } label: {
+                    SettingsQuickActionButton(icon: "ellipsis.circle", isActive: false, action: {})
                 }
+                .buttonStyle(.plain)
             }
-            
-            Text(Date().formatted(date: .abbreviated, time: .omitted))
-                .font(DesignSystem.Typography.small)
-                .foregroundColor(.tertiaryText)
         }
         .padding(.horizontal, DesignSystem.marginStandard)
-        .padding(.top, DesignSystem.marginStandard)
-        .padding(.bottom, DesignSystem.spacingMedium)
+        .padding(.top, DesignSystem.spacingMedium)
+        .padding(.bottom, DesignSystem.spacingSmall)
     }
     
     private var tabNavigationView: some View {
@@ -384,6 +368,10 @@ struct SettingsView: View {
             do {
                 let data = try Data(contentsOf: url)
                 try DataImportExport.shared.importData(from: data)
+                // Recalculate all balances after import to ensure correctness
+                dataManager.setupFundSettings()
+                dataManager.recalculateAllTransactionBalances()
+                dataManager.recalculateAllMemberContributions()
                 dataManager.fetchMembers()
                 dataManager.fetchActiveLoans()
                 dataManager.fetchRecentTransactions()

@@ -3,7 +3,7 @@
 //  SolidarityFundr
 //
 //  Created on 7/20/25.
-//  Liquid Glass Effects matching Transcriptly implementation
+//  Liquid Glass Effects - macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
@@ -14,17 +14,17 @@ struct OptimizedHoverOverlay: ViewModifier {
     let isHovered: Bool
     let cornerRadius: CGFloat
     let intensity: Double
-    
+
     init(isHovered: Bool, cornerRadius: CGFloat, intensity: Double = 0.1) {
         self.isHovered = isHovered
         self.cornerRadius = cornerRadius
         self.intensity = intensity
     }
-    
+
     func body(content: Content) -> some View {
         content
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
@@ -41,14 +41,16 @@ struct OptimizedHoverOverlay: ViewModifier {
     }
 }
 
-// MARK: - Performance-Optimized Glass Layer
+// MARK: - Performance-Optimized Glass Layer (Legacy Fallback)
 
+/// Legacy glass layer for pre-macOS 26 systems
+/// On macOS 26+, prefer using native .glassEffect() modifier
 struct PerformantGlassLayer: View {
     let material: Material
     let cornerRadius: CGFloat
     let strokeWidth: CGFloat
     let strokeOpacity: Double
-    
+
     init(
         material: Material = .ultraThinMaterial,
         cornerRadius: CGFloat = DesignSystem.cornerRadiusMedium,
@@ -60,15 +62,15 @@ struct PerformantGlassLayer: View {
         self.strokeWidth = strokeWidth
         self.strokeOpacity = strokeOpacity
     }
-    
+
     var body: some View {
         ZStack {
             // Base material layer
-            RoundedRectangle(cornerRadius: cornerRadius)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(material)
-            
+
             // Single stroke overlay for performance
-            RoundedRectangle(cornerRadius: cornerRadius)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         colors: [
@@ -84,6 +86,21 @@ struct PerformantGlassLayer: View {
     }
 }
 
+// MARK: - macOS 26 Native Glass Layer
+
+/// Native glass layer using material backgrounds
+struct NativeGlassLayer: View {
+    let cornerRadius: CGFloat
+
+    init(cornerRadius: CGFloat = DesignSystem.cornerRadiusMedium) {
+        self.cornerRadius = cornerRadius
+    }
+
+    var body: some View {
+        PerformantGlassLayer(cornerRadius: cornerRadius)
+    }
+}
+
 // MARK: - Adaptive Shadow System
 
 struct AdaptiveShadow: ViewModifier {
@@ -91,7 +108,7 @@ struct AdaptiveShadow: ViewModifier {
     let isSelected: Bool
     let baseRadius: CGFloat
     let baseOpacity: Double
-    
+
     init(
         isHovered: Bool,
         isSelected: Bool = false,
@@ -103,25 +120,25 @@ struct AdaptiveShadow: ViewModifier {
         self.baseRadius = baseRadius
         self.baseOpacity = baseOpacity
     }
-    
+
     private var shadowRadius: CGFloat {
         if isSelected { return baseRadius * 1.5 }
         if isHovered { return baseRadius * 1.25 }
         return baseRadius
     }
-    
+
     private var shadowOpacity: Double {
         if isSelected { return baseOpacity * 1.5 }
         if isHovered { return baseOpacity * 1.25 }
         return baseOpacity
     }
-    
+
     private var shadowY: CGFloat {
         if isSelected { return baseRadius * 0.75 }
         if isHovered { return baseRadius * 0.625 }
         return baseRadius * 0.5
     }
-    
+
     func body(content: Content) -> some View {
         content
             .shadow(
@@ -133,12 +150,12 @@ struct AdaptiveShadow: ViewModifier {
     }
 }
 
-// MARK: - Liquid Glass Button Style
+// MARK: - Liquid Glass Button Style (Updated for macOS 26)
 
 struct LiquidGlassButtonStyle: ButtonStyle {
     let cornerRadius: CGFloat
     let material: Material
-    
+
     init(
         cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall,
         material: Material = .ultraThinMaterial
@@ -146,17 +163,17 @@ struct LiquidGlassButtonStyle: ButtonStyle {
         self.cornerRadius = cornerRadius
         self.material = material
     }
-    
+
     func makeBody(configuration: Configuration) -> some View {
-        LiquidGlassButtonView(configuration: configuration, cornerRadius: cornerRadius, material: material)
+        ButtonView(configuration: configuration, cornerRadius: cornerRadius, material: material)
     }
-    
-    struct LiquidGlassButtonView: View {
+
+    struct ButtonView: View {
         let configuration: ButtonStyleConfiguration
         let cornerRadius: CGFloat
         let material: Material
         @State private var isHovered = false
-        
+
         var body: some View {
             configuration.label
                 .background(
@@ -205,7 +222,7 @@ extension View {
             intensity: intensity
         ))
     }
-    
+
     /// Apply adaptive shadow system
     func adaptiveShadow(
         isHovered: Bool,
@@ -220,8 +237,9 @@ extension View {
             baseOpacity: baseOpacity
         ))
     }
-    
+
     /// Apply performant glass background
+    @ViewBuilder
     func performantGlass(
         material: Material = .ultraThinMaterial,
         cornerRadius: CGFloat = DesignSystem.cornerRadiusMedium,
@@ -236,36 +254,153 @@ extension View {
                 strokeOpacity: strokeOpacity
             )
         )
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    /// Apply native glass effect
+    @ViewBuilder
+    func nativeGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusMedium) -> some View {
+        self.background(
+            PerformantGlassLayer(
+                material: .ultraThinMaterial,
+                cornerRadius: cornerRadius
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    /// Apply interactive glass (for buttons and controls)
+    @ViewBuilder
+    func interactiveGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) -> some View {
+        self.background(
+            PerformantGlassLayer(
+                material: .thinMaterial,
+                cornerRadius: cornerRadius
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 
-// MARK: - Liquid Glass Sidebar
+// MARK: - Liquid Glass Sidebar (macOS 26 Updated)
 
 extension View {
+    /// Apply liquid glass sidebar styling
+    @ViewBuilder
     func liquidGlassSidebar() -> some View {
         self
             .background(
-                ZStack {
-                    // Base glass material
-                    RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge)
-                        .fill(.regularMaterial)
-                    
-                    // Subtle gradient overlay for depth
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.05),
-                            Color.clear
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 60)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                }
+                RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge, style: .continuous)
+                    .fill(.regularMaterial)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge)
-                    .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge, style: .continuous))
+    }
+}
+
+// MARK: - Glass Effect Container Wrapper
+
+extension View {
+    /// Wrap content in a GlassEffectContainer on macOS 26+
+    /// Required when multiple glass elements need to sample each other correctly
+    @ViewBuilder
+    func glassContainer() -> some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            GlassEffectContainer {
+                self
+            }
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - Interactive Glass Control Modifier
+
+struct InteractiveGlassControl: ViewModifier {
+    @State private var isHovered = false
+    @State private var isPressed = false
+    let cornerRadius: CGFloat
+
+    init(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) {
+        self.cornerRadius = cornerRadius
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .interactiveGlass(cornerRadius: cornerRadius)
+            .scaleEffect(isPressed ? 0.97 : (isHovered ? 1.02 : 1.0))
+            .animation(DesignSystem.interactiveSpring, value: isHovered)
+            .animation(.easeOut(duration: 0.1), value: isPressed)
+            .onHover { hovering in
+                isHovered = hovering
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in isPressed = true }
+                    .onEnded { _ in isPressed = false }
             )
+    }
+}
+
+extension View {
+    /// Make a view an interactive glass control with hover and press effects
+    func interactiveGlassControl(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) -> some View {
+        modifier(InteractiveGlassControl(cornerRadius: cornerRadius))
+    }
+}
+
+// MARK: - Status Badge with Glass Effect
+
+struct GlassStatusBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(DesignSystem.Typography.badge)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundColor(color)
+            .tertiaryGlass(cornerRadius: DesignSystem.cornerRadiusXSmall)
+            .accessibilityLabel("Status: \(text)")
+    }
+}
+
+// MARK: - Glass Metric Card
+
+struct GlassMetricCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.spacingXSmall) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(color)
+                    .font(.title3)
+                Spacer()
+            }
+
+            Text(value)
+                .font(DesignSystem.Typography.cardTitle)
+                .fontWeight(.semibold)
+
+            Text(title)
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DesignSystem.spacingMedium)
+        .secondaryGlass()
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(DesignSystem.gentleSpring, value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .accessibleCard(label: title, value: value)
     }
 }

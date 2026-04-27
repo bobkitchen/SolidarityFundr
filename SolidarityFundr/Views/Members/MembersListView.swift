@@ -3,6 +3,7 @@
 //  SolidarityFundr
 //
 //  Created on 7/19/25.
+//  macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
@@ -11,28 +12,33 @@ struct MembersListView: View {
     @StateObject private var viewModel = MemberViewModel()
     @State private var showingAddMember = false
     @State private var searchText = ""
+    @State private var refreshID = UUID()
 
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Statistics Header
-            memberStatisticsHeader
+        GlassContainerCompat {
+            VStack(spacing: 0) {
+                // Statistics Header
+                memberStatisticsHeader
 
-            // Filter Bar
-            filterBar
+                // Filter Bar
+                filterBar
 
-            // Members List
-            if viewModel.filteredMembers.isEmpty {
-                emptyStateView
-            } else {
-                membersList
+                // Members List
+                if viewModel.filteredMembers.isEmpty {
+                    emptyStateView
+                } else {
+                    membersList
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Members list")
         .sheet(isPresented: $showingAddMember) {
             AddMemberSheet(viewModel: viewModel)
         }
@@ -43,6 +49,19 @@ struct MembersListView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+            viewModel.loadMembers()
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            viewModel.loadMembers()
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+            viewModel.loadMembers()
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
 
     private func openMemberDetail(_ member: Member) {
@@ -70,13 +89,15 @@ struct MembersListView: View {
                     
                     Spacer()
                     
-                    // Toolbar actions
+                    // Toolbar actions with macOS 26 glass styles
                     Button {
                         showingAddMember = true
                     } label: {
                         Label("Add Member", systemImage: "plus")
                     }
-                    
+                    .buttonStyle(TahoeGlassButtonStyle(isProminent: true))
+                    .accessibleControl(label: "Add new member")
+
                     Menu {
                         Button {
                             viewModel.loadMembers()
@@ -86,6 +107,7 @@ struct MembersListView: View {
                     } label: {
                         Label("More", systemImage: "ellipsis.circle")
                     }
+                    .accessibilityLabel("More options")
                 }
                 
                 Text(Date().formatted(date: .abbreviated, time: .omitted))

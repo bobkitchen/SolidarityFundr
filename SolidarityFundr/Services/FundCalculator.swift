@@ -20,9 +20,10 @@ class FundCalculator {
     // MARK: - Fund Balance Calculations
     
     func calculateFundBalance(settings: FundSettings? = nil) -> Double {
-        // Get the balance from the most recent transaction
+        // Get the balance from the most recently created transaction
+        // Sort by createdAt (insertion order) instead of transactionDate to handle backdated entries correctly
         let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
         request.fetchLimit = 1
         
         do {

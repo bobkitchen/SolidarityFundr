@@ -41,7 +41,10 @@ class PaymentViewModel: ObservableObject {
     // Edit mode
     @Published var isEditMode = false
     @Published var editingPayment: Payment?
-    
+
+    /// Guards against Combine observer side-effects while populating form fields for editing
+    private var isLoadingEditData = false
+
     private let dataManager = DataManager.shared
     private let businessRules = BusinessRulesEngine.shared
     private var cancellables = Set<AnyCancellable>()
@@ -114,35 +117,39 @@ class PaymentViewModel: ObservableObject {
         // Observe member selection changes
         $selectedMember
             .sink { [weak self] member in
-                self?.updateAvailableLoans(for: member)
-                self?.calculatePaymentBreakdown()
+                guard let self = self, !self.isLoadingEditData else { return }
+                self.updateAvailableLoans(for: member)
+                self.calculatePaymentBreakdown()
             }
             .store(in: &cancellables)
-        
+
         // Observe payment amount changes
         $paymentAmount
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                self?.calculatePaymentBreakdown()
+                guard let self = self, !self.isLoadingEditData else { return }
+                self.calculatePaymentBreakdown()
             }
             .store(in: &cancellables)
-        
+
         // Observe loan payment toggle
         $isLoanPayment
             .sink { [weak self] isLoan in
-                guard let self = self else { return }
-                // Clear selected loan when switching to contribution
+                guard let self = self, !self.isLoadingEditData else { return }
                 if !isLoan {
                     self.selectedLoan = nil
+                } else {
+                    self.updateAvailableLoans(for: self.selectedMember)
                 }
                 self.calculatePaymentBreakdown()
             }
             .store(in: &cancellables)
-        
+
         // Observe selected loan changes
         $selectedLoan
             .sink { [weak self] _ in
-                self?.calculatePaymentBreakdown()
+                guard let self = self, !self.isLoadingEditData else { return }
+                self.calculatePaymentBreakdown()
             }
             .store(in: &cancellables)
     }
@@ -325,16 +332,20 @@ class PaymentViewModel: ObservableObject {
     
     func loadPaymentForEditing(_ payment: Payment) {
         print("🔧 PaymentViewModel: Loading payment for editing - \(payment.member?.name ?? "Unknown")")
+
+        // Suppress Combine observer side-effects while populating form fields
+        isLoadingEditData = true
+
         editingPayment = payment
         isEditMode = true
-        
+
         // Populate form fields with existing payment data
         selectedMember = payment.member
         paymentAmount = String(format: "%.0f", payment.amount)
         paymentMethod = payment.paymentMethodType
         paymentNotes = payment.notes ?? ""
         paymentDate = payment.paymentDate ?? Date()
-        
+
         // Determine if it's a loan payment
         if payment.loan != nil {
             isLoanPayment = true
@@ -343,12 +354,18 @@ class PaymentViewModel: ObservableObject {
             isLoanPayment = false
             selectedLoan = nil
         }
-        
+
         // Set breakdown amounts
         contributionAmount = payment.contributionAmount
         loanRepaymentAmount = payment.loanRepaymentAmount
-        
-        print("🔧 PaymentViewModel: Edit mode setup complete - Member: \(selectedMember?.name ?? "nil"), Amount: \(paymentAmount)")
+
+        // Re-enable observers now that all fields are set
+        isLoadingEditData = false
+
+        // Trigger a single breakdown calculation with the final state
+        calculatePaymentBreakdown()
+
+        print("🔧 PaymentViewModel: Edit mode setup complete - Member: \(selectedMember?.name ?? "nil"), Amount: \(paymentAmount), isLoanPayment: \(isLoanPayment), selectedLoan: \(selectedLoan?.loanID?.uuidString ?? "nil")")
     }
     
     func updatePayment() {
@@ -511,10 +528,10 @@ class PaymentViewModel: ObservableObject {
             if wasLoanPayment && affectedLoan != nil {
                 dataManager.recalculateLoanBalance(affectedLoan!)
             }
-            
-            // Recalculate member contributions if this was a contribution payment
-            if wasContribution && member != nil {
-                dataManager.recalculateMemberContributions(member!)
+
+            // Always recalculate member contributions when a payment is deleted
+            if let member = member {
+                dataManager.recalculateMemberContributions(member)
             }
             
             // Always recalculate all transaction balances after deleting a payment

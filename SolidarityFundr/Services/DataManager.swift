@@ -18,9 +18,11 @@ class DataManager: ObservableObject {
     @Published var fundSettings: FundSettings?
     @Published var members: [Member] = []
     @Published var activeLoans: [Loan] = []
+    @Published var allLoans: [Loan] = []
     @Published var recentTransactions: [Transaction] = []
     
     private var cancellables = Set<AnyCancellable>()
+    private var isSaving = false
     
     private init() {
         self.persistenceController = PersistenceController.shared
@@ -44,7 +46,8 @@ class DataManager: ObservableObject {
     private func setupObservers() {
         NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)
             .sink { [weak self] _ in
-                self?.fetchInitialData()
+                guard let self = self, !self.isSaving else { return }
+                self.fetchInitialData()
             }
             .store(in: &cancellables)
     }
@@ -52,6 +55,7 @@ class DataManager: ObservableObject {
     private func fetchInitialData() {
         fetchMembers()
         fetchActiveLoans()
+        fetchAllLoans()
         fetchRecentTransactions()
         createMissingTransactions()
     }
@@ -172,6 +176,16 @@ class DataManager: ObservableObject {
             print("Error fetching active loans: \(error)")
         }
     }
+
+    func fetchAllLoans() {
+        let request = Loan.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Loan.issueDate, ascending: false)]
+        do {
+            allLoans = try context.fetch(request)
+        } catch {
+            print("Error fetching all loans: \(error)")
+        }
+    }
     
     func createLoan(for member: Member, amount: Double, repaymentMonths: Int, issueDate: Date = Date(), notes: String? = nil, wasOverridden: Bool = false, overrideReason: String? = nil, overriddenRules: [String] = []) throws -> Loan {
         // Skip eligibility checks if admin override is active
@@ -207,7 +221,8 @@ class DataManager: ObservableObject {
             for: member,
             amount: -amount,
             type: .loanDisbursement,
-            description: "Loan disbursement of KSH \(Int(amount))\(wasOverridden ? " [OVERRIDE]" : "")"
+            description: "Loan disbursement of KSH \(Int(amount))\(wasOverridden ? " [OVERRIDE]" : "")",
+            date: issueDate
         )
 
         saveContext()
@@ -255,13 +270,13 @@ class DataManager: ObservableObject {
         loan.balance = max(0, loan.amount - totalPaid)
         loan.updatedAt = Date()
         
-        // Check if loan should be completed
-        if loan.balance == 0 && loan.loanStatus == .active {
+        // Check if loan should be completed (use epsilon for floating-point comparison)
+        if loan.balance < 0.01 && loan.loanStatus == .active {
             completeLoan(loan)
         }
-        
+
         saveContext()
-        
+
         // Notify that loan balance was updated
         NotificationCenter.default.post(name: .loanBalanceUpdated, object: loan)
     }
@@ -287,8 +302,9 @@ class DataManager: ObservableObject {
             
             loan.balance = max(0, loan.balance - amount)
             loan.updatedAt = Date()
-            
-            if loan.balance == 0 {
+
+            // Use epsilon for floating-point comparison
+            if loan.balance < 0.01 {
                 completeLoan(loan)
             }
             
@@ -296,7 +312,8 @@ class DataManager: ObservableObject {
                 for: member,
                 amount: -amount,  // Negative for loan repayments
                 type: .loanRepayment,
-                description: "Loan payment: KSH \(Int(amount))"
+                description: "Loan payment: KSH \(Int(amount))",
+                date: paymentDate
             )
             payment.transaction = transaction
             
@@ -310,7 +327,8 @@ class DataManager: ObservableObject {
                 for: member,
                 amount: amount,
                 type: .contribution,
-                description: "Monthly contribution"
+                description: "Monthly contribution",
+                date: paymentDate
             )
             payment.transaction = transaction
         }
@@ -424,7 +442,8 @@ class DataManager: ObservableObject {
     func fetchRecentTransactions(limit: Int = 50) {
         let request = Transaction.fetchRequest()
         request.fetchLimit = limit
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        // Sort by createdAt (insertion order) so recently entered transactions appear first
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
         
         do {
             recentTransactions = try context.fetch(request)
@@ -442,10 +461,11 @@ class DataManager: ObservableObject {
     }
     
     @discardableResult
-    private func createTransaction(for member: Member?, amount: Double, type: TransactionType, description: String? = nil) -> Transaction {
-        // Get the previous balance from the most recent transaction
+    private func createTransaction(for member: Member?, amount: Double, type: TransactionType, description: String? = nil, date: Date = Date()) -> Transaction {
+        // Get the previous balance from the most recently created transaction
+        // Sort by createdAt (insertion order) instead of transactionDate to handle backdated entries correctly
         let previousBalanceRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        previousBalanceRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        previousBalanceRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
         previousBalanceRequest.fetchLimit = 1
         
         let lastTransaction = try? context.fetch(previousBalanceRequest).first
@@ -458,7 +478,7 @@ class DataManager: ObservableObject {
         transaction.member = member
         transaction.amount = amount
         transaction.transactionType = type
-        transaction.transactionDate = Date()
+        transaction.transactionDate = date
         transaction.transactionDescription = description
         transaction.previousBalance = previousFundBalance
         
@@ -502,9 +522,10 @@ class DataManager: ObservableObject {
     // MARK: - Transaction Balance Recalculation
     
     func recalculateAllTransactionBalances() {
-        // Fetch all transactions ordered by date
+        // Fetch all transactions ordered by creation time (insertion order)
+        // Sort by createdAt instead of transactionDate to handle backdated entries correctly
         let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: true)]
         
         do {
             let transactions = try context.fetch(request)
@@ -572,10 +593,11 @@ class DataManager: ObservableObject {
     func reconcileAllTransactions() {
         // Debug logging commented out to reduce console noise
         // print("🔄 Starting transaction reconciliation...")
-        
-        // Fetch all transactions ordered by date
+
+        // Fetch all transactions ordered by creation time (insertion order)
+        // Sort by createdAt instead of transactionDate to handle backdated entries correctly
         let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: true)]
         
         do {
             let allTransactions = try context.fetch(request)
@@ -730,7 +752,10 @@ class DataManager: ObservableObject {
             let payments = try context.fetch(request)
             
             // Calculate total contributions
-            let totalContributions = payments.reduce(0) { $0 + $1.contributionAmount }
+            let totalContributions = payments.reduce(0) {
+                let contribution = $1.contributionAmount > 0 ? $1.contributionAmount : $1.amount
+                return $0 + contribution
+            }
             
             print("📊 Recalculating contributions for \(member.name ?? "Unknown")")
             print("   Found \(payments.count) contribution payments")
@@ -759,11 +784,13 @@ class DataManager: ObservableObject {
     
     private func saveContext() {
         if context.hasChanges {
+            isSaving = true
             do {
                 try context.save()
             } catch {
                 print("Error saving context: \(error)")
             }
+            isSaving = false
         }
     }
 }

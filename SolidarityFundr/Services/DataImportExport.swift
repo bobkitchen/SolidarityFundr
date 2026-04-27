@@ -171,13 +171,19 @@ class DataImportExport {
     }
     
     private func clearAllData() throws {
-        // Delete all entities
         let entities = ["Transaction", "Payment", "Loan", "Member", "FundSettings"]
-        
+
         for entity in entities {
             let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entity)
             let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
-            try context.execute(deleteRequest)
+            deleteRequest.resultType = .resultTypeObjectIDs
+            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+            if let objectIDs = result?.result as? [NSManagedObjectID] {
+                NSManagedObjectContext.mergeChanges(
+                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs],
+                    into: [context]
+                )
+            }
         }
     }
     

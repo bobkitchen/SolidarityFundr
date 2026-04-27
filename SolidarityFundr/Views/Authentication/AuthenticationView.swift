@@ -224,8 +224,7 @@ struct AuthenticationView: View {
     
     private func validatePIN() {
         if PINManager.shared.verifyPIN(enteredPIN) {
-            authManager.isAuthenticated = true
-            authManager.isLocked = false
+            authManager.authenticateWithPIN()
         } else {
             pinError = "Incorrect PIN"
             enteredPIN = ""

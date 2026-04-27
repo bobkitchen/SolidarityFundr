@@ -160,6 +160,7 @@ class KeychainService {
 extension KeychainService {
     enum Key {
         static let userPIN = "user_pin"
+        static let pinSalt = "pin_salt"
         static let biometricEnabled = "biometric_enabled"
         static let lastAuthenticationDate = "last_auth_date"
         static let sessionToken = "session_token"

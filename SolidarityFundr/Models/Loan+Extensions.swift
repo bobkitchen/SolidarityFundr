@@ -31,8 +31,9 @@ extension Loan {
     
     var nextPaymentDue: Date? {
         guard loanStatus == .active,
-              let issueDate = issueDate else { return nil }
-        
+              let issueDate = issueDate,
+              monthlyPayment > 0 else { return nil }
+
         let calendar = Calendar.current
         let paidMonths = Int((amount - balance) / monthlyPayment)
         return calendar.date(byAdding: .month, value: paidMonths + 1, to: issueDate)

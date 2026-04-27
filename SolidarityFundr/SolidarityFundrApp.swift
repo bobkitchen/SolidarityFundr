@@ -53,9 +53,6 @@ struct SolidarityFundrApp: App {
             #endif
         }
         #if os(macOS)
-        // IMPORTANT: Use .automatic instead of .plain to get traffic lights
-        .windowStyle(.automatic)
-        // Keep the hidden title bar for integrated look
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1200, height: 800)

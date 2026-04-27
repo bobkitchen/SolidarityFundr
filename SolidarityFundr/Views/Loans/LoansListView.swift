@@ -3,37 +3,40 @@
 //  SolidarityFundr
 //
 //  Created on 7/19/25.
+//  macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
-import Combine
 
 struct LoansListView: View {
     @StateObject private var viewModel = LoanViewModel()
     @State private var showingNewLoan = false
-    @State private var cancellables = Set<AnyCancellable>()
 
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Fund Status Header
-            fundStatusHeader
-            
-            // Filter Bar
-            filterBar
-            
-            // Loans List
-            if viewModel.filteredLoans.isEmpty {
-                emptyStateView
-            } else {
-                loansList
+        GlassContainerCompat {
+            VStack(spacing: 0) {
+                // Fund Status Header
+                fundStatusHeader
+
+                // Filter Bar
+                filterBar
+
+                // Loans List
+                if viewModel.filteredLoans.isEmpty {
+                    emptyStateView
+                } else {
+                    loansList
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Loans list")
         .sheet(isPresented: $showingNewLoan) {
             NewLoanSheet()
         }
@@ -44,14 +47,17 @@ struct LoansListView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
-        .onAppear {
-            // Set up listener for loan balance updates
-            NotificationCenter.default.publisher(for: .loanBalanceUpdated)
-                .sink { _ in
-                    print("🔧 LoansListView: Loan balance updated, refreshing loans...")
-                    viewModel.loadLoans()
-                }
-                .store(in: &cancellables)
+        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+            viewModel.loadLoans()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            viewModel.loadLoans()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+            viewModel.loadLoans()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+            viewModel.loadLoans()
         }
     }
 

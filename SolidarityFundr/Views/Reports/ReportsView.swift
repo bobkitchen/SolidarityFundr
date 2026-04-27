@@ -3,13 +3,13 @@
 //  SolidarityFundr
 //
 //  Created on 7/19/25.
+//  macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
 import Charts
 import UniformTypeIdentifiers
 import PDFKit
-import Combine
 
 struct ReportsView: View {
     @EnvironmentObject var dataManager: DataManager
@@ -22,7 +22,6 @@ struct ReportsView: View {
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var refreshID = UUID()
-    @State private var cancellables = Set<AnyCancellable>()
     @State private var showingNotificationHistory = false
     @State private var showingBatchStatement = false
     @State private var hasRecalculated = false
@@ -48,36 +47,40 @@ struct ReportsView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header with title and toolbar
-            reportHeader
-            
-            // Report Type Selector
-            reportTypeSelector
-            
-            // Date Range Selector
-            if selectedReportType != .fundOverview {
-                dateRangeSelector
-            }
-            
-            // Report Content
-            ScrollView {
-                switch selectedReportType {
-                case .fundOverview:
-                    FundOverviewReport()
-                case .memberStatement:
-                    MemberStatementReport(selectedMember: $selectedMember)
-                case .loanSummary:
-                    LoanSummaryReport(startDate: startDate, endDate: endDate)
-                case .monthlyReport:
-                    MonthlyReport(startDate: startDate, endDate: endDate)
-                case .analytics:
-                    AnalyticsReport()
-                case .fundSummary:
-                    FundSummaryReport()
+        GlassContainerCompat {
+            VStack(spacing: 0) {
+                // Header with title and toolbar
+                reportHeader
+
+                // Report Type Selector
+                reportTypeSelector
+
+                // Date Range Selector
+                if selectedReportType != .fundOverview {
+                    dateRangeSelector
+                }
+
+                // Report Content
+                ScrollView {
+                    switch selectedReportType {
+                    case .fundOverview:
+                        FundOverviewReport()
+                    case .memberStatement:
+                        MemberStatementReport(selectedMember: $selectedMember)
+                    case .loanSummary:
+                        LoanSummaryReport(startDate: startDate, endDate: endDate)
+                    case .monthlyReport:
+                        MonthlyReport(startDate: startDate, endDate: endDate)
+                    case .analytics:
+                        AnalyticsReport()
+                    case .fundSummary:
+                        FundSummaryReport()
+                    }
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Reports view")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
         .alert("Export Error", isPresented: $showingError) {
@@ -93,30 +96,24 @@ struct ReportsView: View {
                 .environmentObject(dataManager)
         }
         .onAppear {
-            setupNotificationListeners()
-            // Recalculate all member contributions on view load to fix any discrepancies
             if !hasRecalculated {
                 dataManager.recalculateAllMemberContributions()
                 hasRecalculated = true
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+            refreshID = UUID()
+        }
         .id(refreshID)
-    }
-    
-    private func setupNotificationListeners() {
-        // Listen for payment updates
-        NotificationCenter.default.publisher(for: .paymentSaved)
-            .sink { _ in
-                refreshID = UUID()
-            }
-            .store(in: &cancellables)
-        
-        // Listen for loan balance updates
-        NotificationCenter.default.publisher(for: .loanBalanceUpdated)
-            .sink { _ in
-                refreshID = UUID()
-            }
-            .store(in: &cancellables)
     }
     
     // MARK: - View Components
@@ -1764,7 +1761,7 @@ struct MemberTransactionHistory: View {
     
     var transactions: [Transaction] {
         (member.transactions?.allObjects as? [Transaction] ?? [])
-            .sorted { ($0.transactionDate ?? Date()) > ($1.transactionDate ?? Date()) }
+            .sorted { ($0.createdAt ?? Date()) > ($1.createdAt ?? Date()) }
             .prefix(10)
             .map { $0 }
     }

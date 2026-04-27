@@ -178,43 +178,65 @@ struct PaymentFormView: View {
     
     private var paymentTypeSection: some View {
         Section("Payment Type") {
-            if let member = viewModel.selectedMember, member.hasActiveLoans {
-                Picker("Payment Type", selection: $viewModel.isLoanPayment) {
-                    Text("Monthly Contribution").tag(false)
-                    Text("Loan Repayment").tag(true)
-                }
-                .pickerStyle(.segmented)
-                
-                if viewModel.isLoanPayment {
-                    let activeLoans = member.activeLoans
-                    if activeLoans.count == 1 {
-                        // Single loan - auto-selected
-                        if let loan = activeLoans.first {
+            if let member = viewModel.selectedMember {
+                // In edit mode, always show the picker to allow changing payment type
+                // In new payment mode, only show if member has active loans
+                if viewModel.isEditMode || member.hasActiveLoans {
+                    Picker("Payment Type", selection: $viewModel.isLoanPayment) {
+                        Text("Monthly Contribution").tag(false)
+                        Text("Loan Repayment").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if viewModel.isLoanPayment {
+                        // In edit mode, show all loans (active + completed) for reassignment
+                        // In new payment mode, only show active loans
+                        let availableLoans = viewModel.isEditMode ? member.allLoans : member.activeLoans
+
+                        if availableLoans.isEmpty {
+                            Text("No loans found for this member")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else if availableLoans.count == 1, let loan = availableLoans.first {
                             LoanInfoRow(loan: loan)
-                        }
-                    } else if activeLoans.count > 1 {
-                        // Multiple loans - picker
-                        Picker("Select Loan", selection: $viewModel.selectedLoan) {
-                            Text("Choose a loan").tag(nil as Loan?)
-                            ForEach(activeLoans) { loan in
-                                HStack {
-                                    Text(CurrencyFormatter.shared.format(loan.amount))
-                                    Spacer()
-                                    Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
+                                .onAppear {
+                                    viewModel.selectedLoan = loan
                                 }
-                                .tag(loan as Loan?)
+                            if loan.loanStatus == .completed {
+                                Label("This loan is marked as completed", systemImage: "info.circle")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                        } else {
+                            // Multiple loans - picker
+                            Picker("Select Loan", selection: $viewModel.selectedLoan) {
+                                Text("Choose a loan").tag(nil as Loan?)
+                                ForEach(availableLoans) { loan in
+                                    HStack {
+                                        Text(CurrencyFormatter.shared.format(loan.amount))
+                                        if loan.loanStatus == .completed {
+                                            Text("(Completed)")
+                                                .font(.caption)
+                                                .foregroundColor(.green)
+                                        }
+                                        Spacer()
+                                        Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .tag(loan as Loan?)
+                                }
                             }
                         }
                     }
-                }
-            } else {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Monthly Contribution")
-                        .foregroundColor(.secondary)
+                } else {
+                    // New payment mode with no active loans - contribution only
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Monthly Contribution")
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
         }

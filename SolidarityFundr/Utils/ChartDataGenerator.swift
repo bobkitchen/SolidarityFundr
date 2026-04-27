@@ -40,15 +40,16 @@ class ChartDataGenerator {
         }
         
         // Fetch transactions within the date range
+        // Sort by createdAt (insertion order) instead of transactionDate to handle backdated entries correctly
         let transactionRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
         transactionRequest.predicate = NSPredicate(format: "transactionDate >= %@ AND transactionDate <= %@", startDate as NSDate, endDate as NSDate)
-        transactionRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: true)]
+        transactionRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: true)]
         let transactions = (try? context.fetch(transactionRequest)) ?? []
-        
+
         // Get the last transaction before the period for starting balance
         let beforePeriodRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
         beforePeriodRequest.predicate = NSPredicate(format: "transactionDate < %@", startDate as NSDate)
-        beforePeriodRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        beforePeriodRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
         beforePeriodRequest.fetchLimit = 1
         let lastTransactionBefore = try? context.fetch(beforePeriodRequest).first
         
@@ -136,9 +137,10 @@ class ChartDataGenerator {
             let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthDate) ?? monthDate
             
             // Get the last transaction of the month
+            // Sort by createdAt (insertion order) instead of transactionDate to handle backdated entries correctly
             let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
             request.predicate = NSPredicate(format: "transactionDate < %@", monthEnd as NSDate)
-            request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+            request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
             request.fetchLimit = 1
             
             let lastTransaction = try? context.fetch(request).first
@@ -171,7 +173,9 @@ class ChartDataGenerator {
         
         for i in (0..<months).reversed() {
             let monthDate = calendar.date(byAdding: .month, value: -i, to: endDate) ?? endDate
-            let monthStart = calendar.startOfDay(for: calendar.dateComponents([.year, .month], from: monthDate).date!)
+            let components = calendar.dateComponents([.year, .month], from: monthDate)
+            guard let monthStartDate = calendar.date(from: components) else { continue }
+            let monthStart = calendar.startOfDay(for: monthStartDate)
             let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
             
             // Fetch contributions for this month

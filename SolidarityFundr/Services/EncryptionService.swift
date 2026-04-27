@@ -12,32 +12,37 @@ class EncryptionService {
     static let shared = EncryptionService()
     private let keychainService = KeychainService()
     
-    private init() {
-        ensureEncryptionKey()
-    }
-    
+    private init() {}
+
     // MARK: - Key Management
-    
-    private func ensureEncryptionKey() {
+
+    func initializeKeyIfNeeded() throws {
         if !keychainService.exists(for: KeychainService.Key.encryptionKey) {
-            generateAndStoreKey()
+            try generateAndStoreKey()
         }
     }
-    
-    private func generateAndStoreKey() {
+
+    private func generateAndStoreKey() throws {
         let key = SymmetricKey(size: .bits256)
         let keyData = key.withUnsafeBytes { Data($0) }
-        
+        try keychainService.save(keyData, for: KeychainService.Key.encryptionKey)
+    }
+
+    private func getExistingKey() throws -> SymmetricKey {
         do {
-            try keychainService.save(keyData, for: KeychainService.Key.encryptionKey)
+            let keyData = try keychainService.retrieve(for: KeychainService.Key.encryptionKey)
+            return SymmetricKey(data: keyData)
         } catch {
-            print("Failed to store encryption key: \(error)")
+            throw EncryptionError.keyNotFound
         }
     }
-    
-    private func getKey() throws -> SymmetricKey {
-        let keyData = try keychainService.retrieve(for: KeychainService.Key.encryptionKey)
-        return SymmetricKey(data: keyData)
+
+    func hasEncryptionKey() -> Bool {
+        return keychainService.exists(for: KeychainService.Key.encryptionKey)
+    }
+
+    func hasEncryptedDataWithoutKey() -> Bool {
+        return !hasEncryptionKey()
     }
     
     // MARK: - Encryption Methods
@@ -50,7 +55,7 @@ class EncryptionService {
     }
     
     func encrypt(_ data: Data) throws -> Data {
-        let key = try getKey()
+        let key = try getExistingKey()
         let nonce = AES.GCM.Nonce()
         let sealedBox = try AES.GCM.seal(data, using: key, nonce: nonce)
         
@@ -63,7 +68,7 @@ class EncryptionService {
     }
     
     func decrypt(_ data: Data) throws -> Data {
-        let key = try getKey()
+        let key = try getExistingKey()
         let sealedBox = try AES.GCM.SealedBox(combined: data)
         return try AES.GCM.open(sealedBox, using: key)
     }

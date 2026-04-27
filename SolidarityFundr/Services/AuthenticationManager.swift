@@ -13,8 +13,8 @@ import SwiftUI
 class AuthenticationManager: ObservableObject {
     static let shared = AuthenticationManager()
     
-    @Published var isAuthenticated = false
-    @Published var isLocked = true
+    @Published private(set) var isAuthenticated = false
+    @Published private(set) var isLocked = true
     @Published var biometricType: LABiometryType = .none
     @Published var showingAuthError = false
     @Published var authErrorMessage = ""
@@ -99,6 +99,11 @@ class AuthenticationManager: ObservableObject {
         }
     }
     
+    func authenticateWithPIN() {
+        isAuthenticated = true
+        isLocked = false
+    }
+
     func logout() {
         isAuthenticated = false
         isLocked = true

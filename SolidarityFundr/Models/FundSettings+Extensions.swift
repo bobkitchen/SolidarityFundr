@@ -34,10 +34,11 @@ extension FundSettings {
     }
     
     func calculateFundBalance() -> Double {
-        // Get the balance from the most recent transaction
+        // Get the balance from the most recently created transaction
+        // Sort by createdAt (insertion order) instead of transactionDate to handle backdated entries correctly
         let context = self.managedObjectContext ?? PersistenceController.shared.container.viewContext
         let request: NSFetchRequest<Transaction> = Transaction.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
         request.fetchLimit = 1
         
         do {
@@ -134,8 +135,9 @@ extension FundSettings {
     
     static func fetchOrCreate(in context: NSManagedObjectContext) -> FundSettings {
         let request = NSFetchRequest<FundSettings>(entityName: "FundSettings")
+        request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: true)]
         request.fetchLimit = 1
-        
+
         do {
             if let existing = try context.fetch(request).first {
                 return existing
@@ -172,17 +174,17 @@ extension FundSettings {
     func getNextStatementDate() -> Date? {
         let calendar = Calendar.current
         let today = Date()
-        let currentDay = calendar.component(.day, from: today)
-        
+
         var components = calendar.dateComponents([.year, .month], from: today)
         components.day = Int(smsStatementDay)
-        
+
         if let nextDate = calendar.date(from: components), nextDate > today {
             return nextDate
         } else {
-            // Next month
-            components.month! += 1
-            return calendar.date(from: components)
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: today)!
+            var nextComponents = calendar.dateComponents([.year, .month], from: nextMonth)
+            nextComponents.day = Int(smsStatementDay)
+            return calendar.date(from: nextComponents)
         }
     }
 }

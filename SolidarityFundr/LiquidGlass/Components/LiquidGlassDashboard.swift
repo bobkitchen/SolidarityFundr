@@ -3,7 +3,7 @@
 //  SolidarityFundr
 //
 //  Created on 7/20/25.
-//  Liquid Glass Dashboard Implementation
+//  Liquid Glass Dashboard - macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
@@ -14,7 +14,8 @@ struct LiquidGlassDashboard: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var selectedMetric: MetricType? = nil
     @State private var animateCards = false
-    
+    @State private var refreshID = UUID()
+
     enum MetricType: String, CaseIterable {
         case balance = "Fund Balance"
         case members = "Active Members"
@@ -42,58 +43,76 @@ struct LiquidGlassDashboard: View {
     
     var body: some View {
         ScrollView {
-            VStack(spacing: DesignSystem.spacingXLarge) {
-                // Header
-                DashboardHeader()
-                    .padding(.horizontal, DesignSystem.marginStandard)
-                
-                // Metrics Grid
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: DesignSystem.spacingMedium) {
-                    ForEach(MetricType.allCases, id: \.self) { metric in
-                        LiquidGlassMetricCard(
-                            type: metric,
-                            value: metricValue(for: metric),
-                            trend: metricTrend(for: metric),
-                            isSelected: selectedMetric == metric
-                        )
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                selectedMetric = selectedMetric == metric ? nil : metric
+            // Wrap all glass elements in container for proper sampling (macOS 26)
+            GlassContainerCompat {
+                VStack(spacing: DesignSystem.spacingXLarge) {
+                    // Header
+                    DashboardHeader()
+                        .padding(.horizontal, DesignSystem.marginStandard)
+
+                    // Metrics Grid
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: DesignSystem.spacingMedium) {
+                        ForEach(MetricType.allCases, id: \.self) { metric in
+                            LiquidGlassMetricCard(
+                                type: metric,
+                                value: metricValue(for: metric),
+                                trend: metricTrend(for: metric),
+                                isSelected: selectedMetric == metric
+                            )
+                            .onTapGesture {
+                                withAnimation(DesignSystem.interactiveSpring) {
+                                    selectedMetric = selectedMetric == metric ? nil : metric
+                                }
                             }
+                            .scaleEffect(animateCards ? 1 : 0.9)
+                            .opacity(animateCards ? 1 : 0)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.7)
+                                .delay(Double(metric.hashValue % 4) * 0.1),
+                                value: animateCards
+                            )
                         }
-                        .scaleEffect(animateCards ? 1 : 0.9)
-                        .opacity(animateCards ? 1 : 0)
-                        .animation(
-                            .spring(response: 0.5, dampingFraction: 0.7)
-                            .delay(Double(metric.hashValue % 4) * 0.1),
-                            value: animateCards
-                        )
                     }
+                    .padding(.horizontal, DesignSystem.marginStandard)
+
+                    // Activity Chart
+                    ActivityChartCard()
+                        .padding(.horizontal, DesignSystem.marginStandard)
+
+                    // Recent Transactions
+                    RecentTransactionsCard()
+                        .padding(.horizontal, DesignSystem.marginStandard)
+
+                    // Quick Actions
+                    QuickActionsCard()
+                        .padding(.horizontal, DesignSystem.marginStandard)
+                        .padding(.bottom, DesignSystem.marginStandard)
                 }
-                .padding(.horizontal, DesignSystem.marginStandard)
-                
-                // Activity Chart
-                ActivityChartCard()
-                    .padding(.horizontal, DesignSystem.marginStandard)
-                
-                // Recent Transactions
-                RecentTransactionsCard()
-                    .padding(.horizontal, DesignSystem.marginStandard)
-                
-                // Quick Actions
-                QuickActionsCard()
-                    .padding(.horizontal, DesignSystem.marginStandard)
-                    .padding(.bottom, DesignSystem.marginStandard)
+                .padding(.top, DesignSystem.marginStandard)
             }
-            .padding(.top, DesignSystem.marginStandard) // Normal top padding - traffic lights will overlay
         }
         .background(Color.primaryBackground)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Dashboard overview")
         .onAppear {
             animateCards = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+            refreshID = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+            refreshID = UUID()
+        }
+        .id(refreshID)
     }
     
     private func metricValue(for type: MetricType) -> String {
@@ -146,21 +165,22 @@ struct LiquidGlassMetricCard: View {
     let value: String
     let trend: Double
     let isSelected: Bool
-    
+
     @State private var isHovered = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.spacingSmall) {
             HStack {
                 Image(systemName: type.icon)
                     .foregroundColor(type.color)
                     .font(.system(size: 20, weight: .medium))
+                    .accessibilityHidden(true)
                 Text(type.rawValue)
                     .font(DesignSystem.Typography.caption)
                     .foregroundColor(.secondaryText)
                 Spacer()
             }
-            
+
             Text(value)
                 .font(DesignSystem.Typography.pageTitle)
                 .foregroundColor(.primaryText)
@@ -168,11 +188,7 @@ struct LiquidGlassMetricCard: View {
         }
         .padding(DesignSystem.spacingMedium)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .performantGlass(
-            material: .regularMaterial,
-            cornerRadius: DesignSystem.cornerRadiusLarge,
-            strokeOpacity: 0.1
-        )
+        .secondaryGlass(cornerRadius: DesignSystem.cornerRadiusLarge)
         .adaptiveShadow(
             isHovered: isHovered,
             isSelected: isSelected,
@@ -189,6 +205,7 @@ struct LiquidGlassMetricCard: View {
         .onHover { hovering in
             isHovered = hovering
         }
+        .accessibleCard(label: type.rawValue, value: value)
     }
 }
 
@@ -475,11 +492,9 @@ struct ActivityChartCard: View {
             }
         }
         .padding(DesignSystem.marginStandard)
-        .performantGlass(
-            material: .regularMaterial,
-            cornerRadius: DesignSystem.cornerRadiusLarge,
-            strokeOpacity: 0.1
-        )
+        .secondaryGlass(cornerRadius: DesignSystem.cornerRadiusLarge)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Fund activity chart")
     }
 }
 
@@ -514,11 +529,9 @@ struct RecentTransactionsCard: View {
             }
         }
         .padding(DesignSystem.marginStandard)
-        .performantGlass(
-            material: .regularMaterial,
-            cornerRadius: DesignSystem.cornerRadiusLarge,
-            strokeOpacity: 0.1
-        )
+        .secondaryGlass(cornerRadius: DesignSystem.cornerRadiusLarge)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recent transactions")
         .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
             // Force refresh when transactions are updated
             refreshID = UUID()
@@ -627,11 +640,9 @@ struct QuickActionsCard: View {
             }
         }
         .padding(DesignSystem.marginStandard)
-        .performantGlass(
-            material: .regularMaterial,
-            cornerRadius: DesignSystem.cornerRadiusLarge,
-            strokeOpacity: 0.1
-        )
+        .secondaryGlass(cornerRadius: DesignSystem.cornerRadiusLarge)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Quick actions")
     }
 }
 
@@ -648,24 +659,25 @@ struct LiquidGlassQuickActionButton: View {
     let action: QuickAction
     @State private var isHovered = false
     @State private var isPressed = false
-    
+
     var body: some View {
         Button(action: {}) {
             HStack(spacing: DesignSystem.spacingXSmall) {
                 Image(systemName: action.icon)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.white)
-                
+
                 Text(action.title)
                     .font(DesignSystem.Typography.buttonText)
                     .foregroundColor(.white)
             }
             .padding(.horizontal, DesignSystem.spacingMedium)
             .padding(.vertical, DesignSystem.spacingSmall)
+            .frame(minHeight: DesignSystem.ControlSize.buttonHeightMedium) // macOS 26 taller controls
             .background(action.color)
             .cornerRadius(DesignSystem.cornerRadiusSmall)
         }
-        .buttonStyle(LiquidGlassButtonStyle(cornerRadius: DesignSystem.cornerRadiusSmall))
+        .buttonStyle(TahoeGlassButtonStyle(cornerRadius: DesignSystem.cornerRadiusSmall))
         .adaptiveShadow(
             isHovered: isHovered,
             baseRadius: 4,
@@ -674,6 +686,7 @@ struct LiquidGlassQuickActionButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
+        .accessibleControl(label: action.title)
     }
 }
 

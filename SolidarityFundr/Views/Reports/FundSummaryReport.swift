@@ -13,8 +13,6 @@ struct FundSummaryReport: View {
     @State private var isGeneratingPDF = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    @State private var hasRecalculated = false
-    
     private var fundSummary: FundSummary {
         FundCalculator.shared.generateFundSummary()
     }
@@ -52,13 +50,6 @@ struct FundSummaryReport: View {
             Button("OK") {}
         } message: {
             Text(errorMessage)
-        }
-        .onAppear {
-            // Recalculate all member contributions on view load to fix any discrepancies
-            if !hasRecalculated {
-                dataManager.recalculateAllMemberContributions()
-                hasRecalculated = true
-            }
         }
     }
     
@@ -334,9 +325,10 @@ struct FundSummaryReport: View {
     
     // MARK: - Helper Methods
     
+    @MainActor
     private func generateAndCopyPDF() async {
         isGeneratingPDF = true
-        
+
         do {
             let generator = PDFGenerator()
             let pdfURL = try await generator.generateReport(
@@ -345,17 +337,17 @@ struct FundSummaryReport: View {
                 startDate: Calendar.current.date(byAdding: .month, value: -1, to: Date())!,
                 endDate: Date()
             )
-            
+
             // Read the PDF data
             let pdfData = try Data(contentsOf: pdfURL)
-            
+
             // Copy to clipboard
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setData(pdfData, forType: .pdf)
-            
+
             isGeneratingPDF = false
-            
+
             // Show success message
             let alert = NSAlert()
             alert.messageText = "PDF Copied to Clipboard"
@@ -363,7 +355,7 @@ struct FundSummaryReport: View {
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
             alert.runModal()
-            
+
         } catch {
             isGeneratingPDF = false
             errorMessage = "Failed to generate PDF: \(error.localizedDescription)"

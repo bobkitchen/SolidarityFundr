@@ -858,6 +858,7 @@ struct EditMemberSheet: View {
                 }
             }
             .navigationTitle("Edit Member")
+            .interactiveDismissDisabled(hasUnsavedChanges)
                 .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -928,7 +929,18 @@ struct EditMemberSheet: View {
         }
     }
 
-    // Helper function to get standard loan limit for a role
+    private var hasUnsavedChanges: Bool {
+        name != (member.name ?? "") ||
+        role != member.memberRole ||
+        email != (member.email ?? "") ||
+        phone != (member.phoneNumber ?? "") ||
+        smsOptIn != member.smsOptIn ||
+        joinDate != (member.joinDate ?? Date()) ||
+        hasCustomLoanLimit != (member.customLoanLimit > 0) ||
+        hasCustomRepaymentTerms != (member.customRepaymentMonths != nil && !(member.customRepaymentMonths ?? "").isEmpty) ||
+        overrideReason != (member.overrideReason ?? "")
+    }
+
     private func standardLimitForRole(_ role: MemberRole) -> Double {
         switch role {
         case .driver, .assistant:

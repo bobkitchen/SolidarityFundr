@@ -128,14 +128,21 @@ class AuditLogger {
     
     func cleanupOldLogs(olderThan days: Int = 90) {
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        
+
         let request = NSFetchRequest<NSFetchRequestResult>(entityName: "AuditLog")
         request.predicate = NSPredicate(format: "timestamp < %@", cutoffDate as NSDate)
-        
+
         let deleteRequest = NSBatchDeleteRequest(fetchRequest: request)
-        
+        deleteRequest.resultType = .resultTypeObjectIDs
+
         do {
-            try context.execute(deleteRequest)
+            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+            if let objectIDs = result?.result as? [NSManagedObjectID] {
+                NSManagedObjectContext.mergeChanges(
+                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs],
+                    into: [context]
+                )
+            }
             try context.save()
         } catch {
             print("Failed to cleanup old logs: \(error)")

@@ -563,6 +563,7 @@ struct EditLoanSheet: View {
     @State private var repaymentMonths: Int = 3
     @State private var issueDate = Date()
     @State private var notes: String = ""
+    @State private var loanStatus: LoanStatus = .active
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var showingRecalculateConfirmation = false
@@ -615,6 +616,25 @@ struct EditLoanSheet: View {
                     }
                 }
                 
+                Section("Loan Status") {
+                    Picker("Status", selection: $loanStatus) {
+                        Text("Active").tag(LoanStatus.active)
+                        Text("Completed").tag(LoanStatus.completed)
+                    }
+
+                    if loanStatus != loan.loanStatus {
+                        if loanStatus == .active && loan.loanStatus == .completed {
+                            Text("Reactivating this loan will allow further payments and tracking")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        } else if loanStatus == .completed && loan.balance > 0 {
+                            Text("Warning: This loan still has a balance of \(CurrencyFormatter.shared.format(loan.balance))")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+
                 Section("Notes") {
                     TextEditor(text: $notes)
                         .frame(minHeight: 100)
@@ -664,6 +684,12 @@ struct EditLoanSheet: View {
                         current: DateHelper.formatDate(loan.dueDate),
                         new: DateHelper.formatDate(calculateDueDate())
                     )
+
+                    ComparisonRow(
+                        label: "Status",
+                        current: loan.loanStatus.displayName,
+                        new: loanStatus.displayName
+                    )
                 }
             }
             .navigationTitle("Edit Loan")
@@ -706,6 +732,7 @@ struct EditLoanSheet: View {
         repaymentMonths = Int(loan.repaymentMonths)
         issueDate = loan.issueDate ?? Date()
         notes = loan.notes ?? ""
+        loanStatus = loan.loanStatus
     }
     
     private func calculateMonthlyPayment() -> Double {
@@ -751,12 +778,24 @@ struct EditLoanSheet: View {
         loan.dueDate = calculateDueDate()
         loan.notes = notes.isEmpty ? nil : notes
         loan.updatedAt = Date()
-        
+
+        // Update loan status and completedDate
+        if loanStatus != loan.loanStatus {
+            loan.status = loanStatus.rawValue
+            if loanStatus == .completed {
+                loan.completedDate = Date()
+            } else {
+                // Reactivating the loan - clear completedDate
+                loan.completedDate = nil
+            }
+        }
+
         // Save changes
         do {
             try loan.managedObjectContext?.save()
             // Notify DataManager to refresh loans
             DataManager.shared.fetchActiveLoans()
+            DataManager.shared.fetchAllLoans()
             
             // Post notification that loan was updated
             NotificationCenter.default.post(name: .loanBalanceUpdated, object: loan)

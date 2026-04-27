@@ -3,10 +3,10 @@
 //  SolidarityFundr
 //
 //  Created on 7/19/25.
+//  macOS 26 Tahoe HIG Compliant
 //
 
 import SwiftUI
-import Combine
 
 struct PaymentsView: View {
     @StateObject private var viewModel = PaymentViewModel()
@@ -15,42 +15,46 @@ struct PaymentsView: View {
     // Removed sheet-based edit state variables as we're using windows now
     @State private var showingDeleteConfirmation = false
     @State private var paymentToDelete: Payment?
-    @State private var cancellables = Set<AnyCancellable>()
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Summary Header
-            paymentSummaryHeader
-            
-            // Date Range Filter
-            dateRangeFilter
-            
-            // Filter Options
-            filterBar
-            
-            // Payments List
-            if viewModel.filteredPayments.isEmpty {
-                emptyStateView
-            } else {
-                paymentsList
+        GlassContainerCompat {
+            VStack(spacing: 0) {
+                // Summary Header
+                paymentSummaryHeader
+
+                // Date Range Filter
+                dateRangeFilter
+
+                // Filter Options
+                filterBar
+
+                // Payments List
+                if viewModel.filteredPayments.isEmpty {
+                    emptyStateView
+                } else {
+                    paymentsList
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Payments list")
         .sheet(isPresented: $showingNewPayment) {
             PaymentFormView(viewModel: viewModel)
         }
         // Edit window is now handled by PaymentEditWindowController
         .onAppear {
             viewModel.loadPayments()
-            
-            // Set up listener for the paymentSaved notification
-            NotificationCenter.default.publisher(for: .paymentSaved)
-                .sink { _ in
-                    print("🔧 PaymentsView: Payment saved notification received, reloading payments...")
-                    viewModel.loadPayments()
-                }
-                .store(in: &cancellables)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+            viewModel.loadPayments()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+            viewModel.loadPayments()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+            viewModel.loadPayments()
         }
         .confirmationDialog(
             "Delete Payment",

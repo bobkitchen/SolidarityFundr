@@ -37,7 +37,7 @@ extension Transaction {
     }
     
     static func customFetchRequest(predicate: NSPredicate? = nil,
-                                  sortDescriptors: [NSSortDescriptor] = [NSSortDescriptor(keyPath: \Transaction.transactionDate, ascending: false)]) -> NSFetchRequest<Transaction> {
+                                  sortDescriptors: [NSSortDescriptor] = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]) -> NSFetchRequest<Transaction> {
         let request = NSFetchRequest<Transaction>(entityName: "Transaction")
         request.predicate = predicate
         request.sortDescriptors = sortDescriptors
@@ -84,9 +84,9 @@ enum TransactionType: String, CaseIterable {
     
     var isCredit: Bool {
         switch self {
-        case .contribution, .interestApplied, .bobInvestment:
+        case .contribution, .loanRepayment, .interestApplied, .bobInvestment:
             return true
-        case .loanDisbursement, .loanRepayment, .cashOut, .bobWithdrawal:
+        case .loanDisbursement, .cashOut, .bobWithdrawal:
             return false
         }
     }

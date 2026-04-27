@@ -31,7 +31,13 @@ extension Member {
         let loanArray = loans?.allObjects as? [Loan] ?? []
         return loanArray.filter { $0.loanStatus == .active }
     }
-    
+
+    /// All loans for this member (active and completed), sorted by issue date
+    var allLoans: [Loan] {
+        let loanArray = loans?.allObjects as? [Loan] ?? []
+        return loanArray.sorted { ($0.issueDate ?? Date.distantPast) > ($1.issueDate ?? Date.distantPast) }
+    }
+
     var hasActiveLoans: Bool {
         return !activeLoans.isEmpty
     }
