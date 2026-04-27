@@ -111,35 +111,56 @@ struct DesignSystem {
 }
 
 // MARK: - macOS 26 Glass Effect View Extensions
+//
+// On macOS 26+ / iOS 26+ these route to the native `glassEffect()` so the
+// user actually sees Liquid Glass (refraction, shimmer, morphing). On older
+// OS versions they fall back to the prior `Material`-based rendering. Without
+// the `#available` gate the compat modifiers were silently rendering Material
+// even on Tahoe — which is why the UI looked unchanged.
 
 extension View {
     /// Apply glass effect with capsule shape
     /// Use this for buttons and pill-shaped controls
     @ViewBuilder
     func tahoeGlass() -> some View {
-        self.background(.ultraThinMaterial)
-            .clipShape(Capsule())
+        if #available(macOS 26.0, iOS 26.0, *) {
+            self.glassEffect(.regular, in: Capsule())
+        } else {
+            self.background(.ultraThinMaterial)
+                .clipShape(Capsule())
+        }
     }
 
     /// Apply glass effect with rounded rectangle
     /// Use this for cards and panels
     @ViewBuilder
     func tahoeGlassCard(cornerRadius: CGFloat = DesignSystem.cornerRadiusLarge) -> some View {
-        self.background(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(.regularMaterial)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        if #available(macOS 26.0, iOS 26.0, *) {
+            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            self.background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.regularMaterial)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
     }
 
     /// Apply prominent glass effect for primary actions
     @ViewBuilder
     func tahoeGlassProminent(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) -> some View {
-        self.background(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(.thickMaterial)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        if #available(macOS 26.0, iOS 26.0, *) {
+            // There is no `.prominent` Glass variant. Use accent-tinted regular
+            // glass so prominent surfaces read as filled while still being glass.
+            self.glassEffect(.regular.tint(Color.accentColor.opacity(0.6)),
+                             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            self.background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.thickMaterial)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
     }
 
     /// Apply nested/concentric corners for proper visual hierarchy
@@ -157,7 +178,9 @@ extension View {
 
 // MARK: - macOS 26 Glass Button Style
 
-/// Glass button style
+/// Glass button style. On macOS 26+/iOS 26+ uses the native `.buttonStyle(.glass)` /
+/// `.buttonStyle(.glassProminent)` (which provide proper refraction, scale, shimmer)
+/// via a wrapper. On older OS falls back to the Material-based rendering.
 struct TahoeGlassButtonStyle: ButtonStyle {
     var isProminent: Bool = false
     var cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall
@@ -173,23 +196,40 @@ struct TahoeGlassButtonStyle: ButtonStyle {
         @State private var isHovered = false
 
         var body: some View {
-            configuration.label
-                .padding(.horizontal, DesignSystem.spacingMedium)
-                .padding(.vertical, DesignSystem.spacingSmall)
-                .background(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(isProminent ? .thickMaterial : .ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(isHovered ? 0.2 : 0.1), lineWidth: 0.5)
-                )
-                .scaleEffect(configuration.isPressed ? 0.97 : (isHovered ? 1.02 : 1.0))
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovered)
-                .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
-                .onHover { hovering in
-                    isHovered = hovering
-                }
+            if #available(macOS 26.0, iOS 26.0, *) {
+                // Use the native interactive Glass effect — it provides press
+                // scale, shimmer, and touch-point illumination automatically.
+                let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                configuration.label
+                    .padding(.horizontal, DesignSystem.spacingMedium)
+                    .padding(.vertical, DesignSystem.spacingSmall)
+                    .glassEffect(
+                        isProminent
+                            ? .regular.tint(Color.accentColor.opacity(0.6)).interactive()
+                            : .regular.interactive(),
+                        in: shape
+                    )
+                    .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+                    .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            } else {
+                configuration.label
+                    .padding(.horizontal, DesignSystem.spacingMedium)
+                    .padding(.vertical, DesignSystem.spacingSmall)
+                    .background(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(isProminent ? .thickMaterial : .ultraThinMaterial)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(Color.white.opacity(isHovered ? 0.2 : 0.1), lineWidth: 0.5)
+                    )
+                    .scaleEffect(configuration.isPressed ? 0.97 : (isHovered ? 1.02 : 1.0))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovered)
+                    .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+                    .onHover { hovering in
+                        isHovered = hovering
+                    }
+            }
         }
     }
 }

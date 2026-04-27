@@ -316,15 +316,18 @@ extension View {
 // MARK: - Liquid Glass Sidebar (macOS 26 Updated)
 
 extension View {
-    /// Apply liquid glass sidebar styling
+    /// Apply liquid glass sidebar styling. On macOS 26+/iOS 26+ uses the native
+    /// `glassEffect` so the sidebar actually renders as Liquid Glass (refraction,
+    /// adaptive contrast). Falls back to `.regularMaterial` on older OS.
     @ViewBuilder
     func liquidGlassSidebar() -> some View {
-        self
-            .background(
-                RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge, style: .continuous)
-                    .fill(.regularMaterial)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge, style: .continuous))
+        let shape = RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusLarge, style: .continuous)
+        if #available(macOS 26.0, iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(shape.fill(.regularMaterial))
+                .clipShape(shape)
+        }
     }
 }
 
