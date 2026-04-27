@@ -242,7 +242,7 @@ struct PINSetupView: View {
                 .font(.title)
                 .frame(width: 60, height: 60)
                 .background(Color.gray.opacity(0.2))
-                .cornerRadius(30)
+                .clipShape(RoundedRectangle(cornerRadius: 30))
         }
     }
     

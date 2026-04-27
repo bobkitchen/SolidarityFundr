@@ -15,6 +15,7 @@ struct LiquidGlassDashboard: View {
     @State private var selectedMetric: MetricType? = nil
     @State private var animateCards = false
     @State private var refreshID = UUID()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum MetricType: String, CaseIterable {
         case balance = "Fund Balance"
@@ -50,12 +51,13 @@ struct LiquidGlassDashboard: View {
                     DashboardHeader()
                         .padding(.horizontal, DesignSystem.marginStandard)
 
-                    // Metrics Grid
+                    // Metrics Grid — deterministic stagger via enumeration index
+                    // (hashValue isn't stable across runs). Reduce-motion: skip stagger.
                     LazyVGrid(columns: [
                         GridItem(.flexible()),
                         GridItem(.flexible())
                     ], spacing: DesignSystem.spacingMedium) {
-                        ForEach(MetricType.allCases, id: \.self) { metric in
+                        ForEach(Array(MetricType.allCases.enumerated()), id: \.element) { index, metric in
                             LiquidGlassMetricCard(
                                 type: metric,
                                 value: metricValue(for: metric),
@@ -63,15 +65,16 @@ struct LiquidGlassDashboard: View {
                                 isSelected: selectedMetric == metric
                             )
                             .onTapGesture {
-                                withAnimation(DesignSystem.interactiveSpring) {
+                                withAnimation(.bouncy) {
                                     selectedMetric = selectedMetric == metric ? nil : metric
                                 }
                             }
-                            .scaleEffect(animateCards ? 1 : 0.9)
-                            .opacity(animateCards ? 1 : 0)
+                            .scaleEffect(animateCards || reduceMotion ? 1 : 0.9)
+                            .opacity(animateCards || reduceMotion ? 1 : 0)
                             .animation(
-                                .spring(response: 0.5, dampingFraction: 0.7)
-                                .delay(Double(metric.hashValue % 4) * 0.1),
+                                reduceMotion
+                                    ? .linear(duration: 0)
+                                    : .spring(response: 0.5, dampingFraction: 0.7).delay(Double(index) * 0.08),
                                 value: animateCards
                             )
                         }
@@ -185,6 +188,8 @@ struct LiquidGlassMetricCard: View {
                 .font(DesignSystem.Typography.pageTitle)
                 .foregroundColor(.primaryText)
                 .multilineTextAlignment(.leading)
+                .contentTransition(.numericText())
+                .animation(.snappy, value: value)
         }
         .padding(DesignSystem.spacingMedium)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -462,7 +467,7 @@ struct ActivityChartCard: View {
                         .foregroundColor(.secondary)
                         .padding(8)
                         .background(.ultraThinMaterial)
-                        .cornerRadius(6)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                         .padding(8)
                     }
                 }
@@ -675,7 +680,7 @@ struct LiquidGlassQuickActionButton: View {
             .padding(.vertical, DesignSystem.spacingSmall)
             .frame(minHeight: DesignSystem.ControlSize.buttonHeightMedium) // macOS 26 taller controls
             .background(action.color)
-            .cornerRadius(DesignSystem.cornerRadiusSmall)
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusSmall))
         }
         .buttonStyle(TahoeGlassButtonStyle(cornerRadius: DesignSystem.cornerRadiusSmall))
         .adaptiveShadow(

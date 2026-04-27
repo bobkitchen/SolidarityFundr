@@ -124,8 +124,11 @@ class SessionManager: ObservableObject {
     }
     
     @objc private func appDidResignActive() {
-        // Optional: Lock immediately when app loses focus
-        // lockSession()
+        // Lock immediately when app loses focus. Auto-lock timer alone is
+        // insufficient — timers reset on any input in any app, and a user who
+        // Cmd-Tabs away from a financial app should not return to an unlocked
+        // session.
+        lockSession()
     }
     
     deinit {

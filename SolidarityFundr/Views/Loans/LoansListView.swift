@@ -17,47 +17,63 @@ struct LoansListView: View {
     #endif
 
     var body: some View {
-        GlassContainerCompat {
-            VStack(spacing: 0) {
-                // Fund Status Header
-                fundStatusHeader
+        NavigationStack {
+            GlassContainerCompat {
+                VStack(spacing: 0) {
+                    fundStatusHeader
+                    filterBar
 
-                // Filter Bar
-                filterBar
-
-                // Loans List
-                if viewModel.filteredLoans.isEmpty {
-                    emptyStateView
-                } else {
-                    loansList
+                    if viewModel.filteredLoans.isEmpty {
+                        emptyStateView
+                    } else {
+                        loansList
+                    }
                 }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Loans list")
-        .sheet(isPresented: $showingNewLoan) {
-            NewLoanSheet()
-        }
-        .alert("Error", isPresented: $viewModel.showingError) {
-            Button("OK") {
-                viewModel.showingError = false
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Loans list")
+            .navigationTitle("Loans")
+            .toolbar {
+                if !viewModel.eligibleMembers.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showingNewLoan = true } label: {
+                            Label("New Loan", systemImage: "plus")
+                        }
+                    }
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Menu {
+                        Button { viewModel.loadLoans() } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                }
             }
-        } message: {
-            Text(viewModel.errorMessage ?? "An error occurred")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
-            viewModel.loadLoans()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
-            viewModel.loadLoans()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
-            viewModel.loadLoans()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
-            viewModel.loadLoans()
+            .searchable(text: $viewModel.searchText, prompt: "Search by member name")
+            .sheet(isPresented: $showingNewLoan) {
+                NewLoanSheet()
+            }
+            .alert("Error", isPresented: $viewModel.showingError) {
+                Button("OK") { viewModel.showingError = false }
+            } message: {
+                Text(viewModel.errorMessage ?? "An error occurred")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+                viewModel.loadLoans()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+                viewModel.loadLoans()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+                viewModel.loadLoans()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+                viewModel.loadLoans()
+            }
         }
     }
 
@@ -73,43 +89,17 @@ struct LoansListView: View {
 
     private var fundStatusHeader: some View {
         VStack(spacing: 12) {
-            // Clean header matching Overview style
+            // Title and primary actions are now in .navigationTitle / .toolbar.
             VStack(alignment: .leading, spacing: 8) {
                 Text("Loan Management")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                
-                HStack {
-                    Text("Loans")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    
-                    Spacer()
-                    
-                    // Toolbar actions
-                    if !viewModel.eligibleMembers.isEmpty {
-                        Button {
-                            showingNewLoan = true
-                        } label: {
-                            Label("New Loan", systemImage: "plus")
-                        }
-                    }
-                    
-                    Menu {
-                        Button {
-                            viewModel.loadLoans()
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
-                    }
-                }
-                
+
                 Text(Date().formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
                     .foregroundColor(Color.secondary.opacity(0.7))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 16)
@@ -123,6 +113,8 @@ struct LoansListView: View {
                     Text(viewModel.formatCurrency(viewModel.fundBalance))
                         .font(.title2)
                         .fontWeight(.semibold)
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: viewModel.fundBalance)
                 }
                 
                 Spacer()
@@ -166,19 +158,7 @@ struct LoansListView: View {
     
     private var filterBar: some View {
         VStack(spacing: 0) {
-            // Search bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                TextField("Search by member name...", text: $viewModel.searchText)
-                    .textFieldStyle(.plain)
-            }
-            .padding(8)
-            .background(Color.secondary.opacity(0.1))
-            .cornerRadius(8)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-            
+            // Native search field is provided by .searchable on the parent view.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     // Status Filter
@@ -200,7 +180,7 @@ struct LoansListView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 
                 // Overdue Filter
@@ -369,7 +349,7 @@ struct NewLoanSheet: View {
                                     Spacer()
                                     TextField("0", text: $viewModel.loanAmount)
                                         .multilineTextAlignment(.trailing)
-                                        .onChange(of: viewModel.loanAmount) { _ in
+                                        .onChange(of: viewModel.loanAmount) {
                                             viewModel.calculateLoanDetails()
                                         }
                                 }
@@ -400,10 +380,10 @@ struct NewLoanSheet: View {
                                         }
                                     }
                                 }
-                                .onChange(of: viewModel.repaymentMonths) { _ in
+                                .onChange(of: viewModel.repaymentMonths) {
                                     viewModel.calculateLoanDetails()
                                 }
-                                .onChange(of: viewModel.selectedMember) { _ in
+                                .onChange(of: viewModel.selectedMember) {
                                     // Reset repayment months when member changes
                                     if let member = viewModel.selectedMember {
                                         // Use the first allowed repayment month for this member
@@ -417,7 +397,7 @@ struct NewLoanSheet: View {
                                 // Issue Date
                                 DatePicker("Issue Date", selection: $viewModel.loanIssueDate, displayedComponents: .date)
                                     .datePickerStyle(.compact)
-                                    .onChange(of: viewModel.loanIssueDate) { _ in
+                                    .onChange(of: viewModel.loanIssueDate) {
                                         viewModel.calculateLoanDetails()
                                     }
                             }

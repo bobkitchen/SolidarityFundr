@@ -47,73 +47,97 @@ struct ReportsView: View {
     }
     
     var body: some View {
-        GlassContainerCompat {
-            VStack(spacing: 0) {
-                // Header with title and toolbar
-                reportHeader
+        NavigationStack {
+            GlassContainerCompat {
+                VStack(spacing: 0) {
+                    reportHeader
+                    reportTypeSelector
 
-                // Report Type Selector
-                reportTypeSelector
+                    if selectedReportType != .fundOverview {
+                        dateRangeSelector
+                    }
 
-                // Date Range Selector
-                if selectedReportType != .fundOverview {
-                    dateRangeSelector
-                }
-
-                // Report Content
-                ScrollView {
-                    switch selectedReportType {
-                    case .fundOverview:
-                        FundOverviewReport()
-                    case .memberStatement:
-                        MemberStatementReport(selectedMember: $selectedMember)
-                    case .loanSummary:
-                        LoanSummaryReport(startDate: startDate, endDate: endDate)
-                    case .monthlyReport:
-                        MonthlyReport(startDate: startDate, endDate: endDate)
-                    case .analytics:
-                        AnalyticsReport()
-                    case .fundSummary:
-                        FundSummaryReport()
+                    ScrollView {
+                        switch selectedReportType {
+                        case .fundOverview:
+                            FundOverviewReport()
+                        case .memberStatement:
+                            MemberStatementReport(selectedMember: $selectedMember)
+                        case .loanSummary:
+                            LoanSummaryReport(startDate: startDate, endDate: endDate)
+                        case .monthlyReport:
+                            MonthlyReport(startDate: startDate, endDate: endDate)
+                        case .analytics:
+                            AnalyticsReport()
+                        case .fundSummary:
+                            FundSummaryReport()
+                        }
                     }
                 }
             }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Reports view")
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
-        .alert("Export Error", isPresented: $showingError) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage)
-        }
-        .sheet(isPresented: $showingNotificationHistory) {
-            NotificationHistoryView()
-        }
-        .sheet(isPresented: $showingBatchStatement) {
-            BatchStatementView()
-                .environmentObject(dataManager)
-        }
-        .onAppear {
-            if !hasRecalculated {
-                dataManager.recalculateAllMemberContributions()
-                hasRecalculated = true
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Reports view")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
+            .navigationTitle("Reports")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        generatePDF()
+                    } label: {
+                        if isGeneratingPDF {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
+                        }
+                    }
+                    .disabled(isGeneratingPDF)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Menu {
+                        Button { showingBatchStatement = true } label: {
+                            Label("Batch Statements", systemImage: "doc.on.doc.fill")
+                        }
+                        Button { showingNotificationHistory = true } label: {
+                            Label("Message History", systemImage: "message.fill")
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                }
             }
+            .alert("Export Error", isPresented: $showingError) {
+                Button("OK") {}
+            } message: {
+                Text(errorMessage)
+            }
+            .sheet(isPresented: $showingNotificationHistory) {
+                NotificationHistoryView()
+            }
+            .sheet(isPresented: $showingBatchStatement) {
+                BatchStatementView()
+                    .environmentObject(dataManager)
+            }
+            .onAppear {
+                if !hasRecalculated {
+                    dataManager.recalculateAllMemberContributions()
+                    hasRecalculated = true
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+                refreshID = UUID()
+            }
+            .id(refreshID)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
-            refreshID = UUID()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
-            refreshID = UUID()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
-            refreshID = UUID()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
-            refreshID = UUID()
-        }
-        .id(refreshID)
     }
     
     // MARK: - View Components
@@ -123,90 +147,17 @@ struct ReportsView: View {
             Text("Analytics & Insights")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            
-            HStack {
-                Text("Reports")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                
-                Spacer()
-                
-                Button {
-                    showingBatchStatement = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "doc.on.doc.fill")
-                            .font(.system(size: 14))
-                        Text("Batch Statements")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-                    )
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    showingNotificationHistory = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "message.fill")
-                            .font(.system(size: 14))
-                        Text("Message History")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-                    )
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    generatePDF()
-                } label: {
-                    HStack(spacing: 6) {
-                        if isGeneratingPDF {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "doc.text.magnifyingglass")
-                                .font(.system(size: 14))
-                            Text("Open in Preview")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(isGeneratingPDF)
-            }
-            
+
             Text(Date().formatted(date: .abbreviated, time: .omitted))
                 .font(.caption)
                 .foregroundColor(Color.secondary.opacity(0.7))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.top, 20)
         .padding(.bottom, 16)
     }
-    
+
     private var reportTypeSelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -245,7 +196,7 @@ struct ReportsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.ultraThinMaterial)
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             
             Spacer()
         }
@@ -509,7 +460,7 @@ struct MemberStatementActions: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(.ultraThinMaterial)
-                .cornerRadius(6)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             
             // Action Buttons
@@ -531,7 +482,7 @@ struct MemberStatementActions: View {
                     .padding(.vertical, 10)
                     .background(Color.accentColor)
                     .foregroundColor(.white)
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
                 .disabled(isGeneratingPDF || isSendingMessage)
@@ -554,7 +505,7 @@ struct MemberStatementActions: View {
                     .padding(.vertical, 10)
                     .background(canSendMessage && pdfURL != nil ? Color.green : Color.gray)
                     .foregroundColor(.white)
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSendMessage || pdfURL == nil || isSendingMessage)
@@ -599,12 +550,12 @@ struct MemberStatementActions: View {
                 }
                 .padding()
                 .background(Color.secondary.opacity(0.05))
-                .cornerRadius(6)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     private func generateAndPreviewPDF() {
@@ -709,7 +660,7 @@ struct FundBalanceCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -738,7 +689,7 @@ struct ReportMetricCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -784,7 +735,7 @@ struct UtilizationChart: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     private var utilizationColor: Color {
@@ -851,7 +802,7 @@ struct FundCompositionChart: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -944,7 +895,7 @@ struct MemberSelector: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(.ultraThinMaterial)
-                        .cornerRadius(6)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     
                     // Sort Menu
@@ -965,7 +916,7 @@ struct MemberSelector: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(.ultraThinMaterial)
-                        .cornerRadius(6)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     
                     Spacer()
@@ -1038,7 +989,7 @@ struct MemberSelector: View {
                                             .padding(.vertical, 2)
                                             .background(Color.red.opacity(0.2))
                                             .foregroundColor(.red)
-                                            .cornerRadius(4)
+                                            .clipShape(RoundedRectangle(cornerRadius: 4))
                                     }
                                     
                                     Image(systemName: "chevron.right")
@@ -1048,7 +999,7 @@ struct MemberSelector: View {
                             }
                             .padding()
                             .background(Color.secondary.opacity(0.05))
-                            .cornerRadius(8)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
                     }
@@ -1057,7 +1008,7 @@ struct MemberSelector: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1164,13 +1115,13 @@ struct LoanSummaryReport: View {
                         }
                         .padding()
                         .background(Color.secondary.opacity(0.05))
-                        .cornerRadius(8)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }
             .padding()
             .background(Color.secondary.opacity(0.1))
-            .cornerRadius(10)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .padding()
     }
@@ -1255,7 +1206,7 @@ struct ContributionAnalysisCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1299,7 +1250,7 @@ struct LoanActivityCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1334,7 +1285,7 @@ struct MemberActivityCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1378,7 +1329,7 @@ struct FundGrowthChart: View {
                     .frame(height: 200)
                     .frame(maxWidth: .infinity)
                     .background(Color.secondary.opacity(0.05))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 Chart(fundGrowthData, id: \.month) { item in
                     LineMark(
@@ -1409,7 +1360,7 @@ struct FundGrowthChart: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1441,7 +1392,7 @@ struct MemberDistributionChart: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1505,7 +1456,7 @@ struct LoanPerformanceMetrics: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1575,7 +1526,7 @@ struct MemberInfoCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1637,7 +1588,7 @@ struct MemberFinancialSummary: View {
             }
             .padding()
             .background(Color.secondary.opacity(0.1))
-            .cornerRadius(10)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 }
@@ -1667,7 +1618,7 @@ struct FinancialReportMetricCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1746,13 +1697,13 @@ struct MemberLoanHistory: View {
                     }
                     .padding()
                     .background(Color.secondary.opacity(0.05))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1814,7 +1765,7 @@ struct MemberTransactionHistory: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1864,7 +1815,7 @@ struct RecentActivitySection: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

@@ -62,11 +62,13 @@ class BusinessRulesEngine {
             if member.memberStatus != .active {
                 // Cannot override inactive/suspended status
                 errors.append("Member must be active to receive a loan")
-            } else if member.memberRole == .securityGuard && member.monthsAsMember < 3 {
-                let message = "Guards must have 3 months of contributions before taking a loan (currently \(member.monthsAsMember) months)"
+            } else if (member.memberRole == .securityGuard || member.memberRole == .partTime)
+                        && member.contributionMonthsCount < 3 {
+                let roleName = member.memberRole == .securityGuard ? "Guards" : "Part-time staff"
+                let message = "\(roleName) need 3 months of contributions before taking a loan (currently \(member.contributionMonthsCount))"
                 if adminOverride {
                     warnings.append("⚠️ OVERRIDE: \(message)")
-                    overriddenRules.append("Guard eligibility requirement")
+                    overriddenRules.append("\(roleName) eligibility requirement")
                 } else {
                     errors.append(message)
                 }
@@ -243,7 +245,8 @@ class BusinessRulesEngine {
     }
     
     func calculateMonthlyPayment(loanAmount: Double, months: Int) -> Double {
-        return loanAmount / Double(months)
+        guard months > 0 else { return 0 }
+        return (loanAmount / Double(months)).rounded(.toNearestOrAwayFromZero)
     }
 }
 

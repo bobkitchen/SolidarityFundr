@@ -8,10 +8,13 @@
 import Foundation
 import CoreData
 
+/// Audit entries are written via a dedicated background context so callers
+/// can log from any thread without corrupting `viewContext`. Entries are
+/// append-only by policy — there is no public delete API.
 class AuditLogger {
     static let shared = AuditLogger()
-    private let context: NSManagedObjectContext
-    
+    private let persistenceController: PersistenceController
+
     enum AuditEventType: String {
         case authentication = "Authentication"
         case loanCreated = "Loan Created"
@@ -29,31 +32,39 @@ class AuditLogger {
     }
     
     private init() {
-        self.context = PersistenceController.shared.container.viewContext
+        self.persistenceController = PersistenceController.shared
     }
-    
+
+    /// Read-only context used for fetches. Audit writes happen on background contexts.
+    private var readContext: NSManagedObjectContext {
+        persistenceController.container.viewContext
+    }
+
     // MARK: - Logging Methods
-    
-    func log(event: AuditEventType, 
+
+    func log(event: AuditEventType,
              details: String? = nil,
              amount: Double? = nil,
              memberID: UUID? = nil,
              loanID: UUID? = nil) {
-        
-        let auditEntry = AuditLog(context: context)
-        auditEntry.eventID = UUID()
-        auditEntry.eventType = event.rawValue
-        auditEntry.timestamp = Date()
-        auditEntry.details = details
-        auditEntry.amount = amount ?? 0
-        auditEntry.memberID = memberID
-        auditEntry.loanID = loanID
-        auditEntry.deviceInfo = getDeviceInfo()
-        
-        do {
-            try context.save()
-        } catch {
-            print("Failed to save audit log: \(error)")
+        let bgContext = persistenceController.container.newBackgroundContext()
+        let device = getDeviceInfo()
+        bgContext.perform {
+            let auditEntry = AuditLog(context: bgContext)
+            auditEntry.eventID = UUID()
+            auditEntry.eventType = event.rawValue
+            auditEntry.timestamp = Date()
+            auditEntry.details = details
+            auditEntry.amount = amount ?? 0
+            auditEntry.memberID = memberID
+            auditEntry.loanID = loanID
+            auditEntry.deviceInfo = device
+
+            do {
+                try bgContext.save()
+            } catch {
+                print("Failed to save audit log: \(error)")
+            }
         }
     }
     
@@ -87,7 +98,7 @@ class AuditLogger {
         request.fetchLimit = limit
         
         do {
-            return try context.fetch(request)
+            return try readContext.fetch(request)
         } catch {
             print("Failed to fetch audit logs: \(error)")
             return []
@@ -110,7 +121,7 @@ class AuditLogger {
         request.fetchLimit = limit
         
         do {
-            return try context.fetch(request)
+            return try readContext.fetch(request)
         } catch {
             print("Failed to fetch security events: \(error)")
             return []
@@ -125,27 +136,8 @@ class AuditLogger {
     }
     
     // MARK: - Cleanup
-    
-    func cleanupOldLogs(olderThan days: Int = 90) {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-
-        let request = NSFetchRequest<NSFetchRequestResult>(entityName: "AuditLog")
-        request.predicate = NSPredicate(format: "timestamp < %@", cutoffDate as NSDate)
-
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: request)
-        deleteRequest.resultType = .resultTypeObjectIDs
-
-        do {
-            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
-            if let objectIDs = result?.result as? [NSManagedObjectID] {
-                NSManagedObjectContext.mergeChanges(
-                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs],
-                    into: [context]
-                )
-            }
-            try context.save()
-        } catch {
-            print("Failed to cleanup old logs: \(error)")
-        }
-    }
+    //
+    // Audit logs are append-only by policy. There is no public delete API.
+    // If retention pruning is ever required, add an explicit admin-confirmed
+    // flow that signs the cleanup event into a separate tamper-evident store.
 }

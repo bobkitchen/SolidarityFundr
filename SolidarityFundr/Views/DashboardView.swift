@@ -12,7 +12,6 @@ import Charts
 struct DashboardView: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var selectedTab = 0
-    @AppStorage("useLiquidGlass") private var useLiquidGlass: Bool = true
     @AppStorage("isSidebarCollapsed") private var isSidebarCollapsed: Bool = false
 
     private var sidebarWidth: CGFloat {
@@ -21,34 +20,23 @@ struct DashboardView: View {
 
     var body: some View {
         #if os(macOS)
-        if useLiquidGlass {
-            HStack(spacing: 0) {
-                // Sidebar with macOS 26 glass effects
-                FloatingSidebar(
-                    selectedSection: $selectedTab,
-                    isCollapsed: $isSidebarCollapsed
-                )
-                .frame(width: sidebarWidth)
-                .sidebarGlassBackground() // macOS 26 backgroundExtensionEffect
+        // Single canonical dashboard path: floating glass sidebar + DetailView.
+        // The previous NavigationSplitView fallback has been retired.
+        HStack(spacing: 0) {
+            FloatingSidebar(
+                selectedSection: $selectedTab,
+                isCollapsed: $isSidebarCollapsed
+            )
+            .frame(width: sidebarWidth)
+            .sidebarGlassBackground()
 
-                // Main content
-                DetailView(selectedTab: selectedTab)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(NSColor.windowBackgroundColor))
-            }
-            .frame(minWidth: isSidebarCollapsed ? 600 : 800, minHeight: 640)
-            .background(Color(NSColor.windowBackgroundColor))
-            .accessibilityElement(children: .contain)
-        } else {
-            // Original Design with macOS 26 NavigationSplitView updates
-            NavigationSplitView {
-                SidebarView(selectedTab: $selectedTab)
-                    .sidebarGlassBackground() // macOS 26 backgroundExtensionEffect
-            } detail: {
-                DetailView(selectedTab: selectedTab)
-            }
-            .background(Color(NSColor.windowBackgroundColor))
+            DetailView(selectedTab: selectedTab)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(NSColor.windowBackgroundColor))
         }
+        .frame(minWidth: isSidebarCollapsed ? 600 : 800, minHeight: 640)
+        .background(Color(NSColor.windowBackgroundColor))
+        .accessibilityElement(children: .contain)
         #else
         TabView(selection: $selectedTab) {
             OverviewView()
@@ -86,69 +74,17 @@ struct DashboardView: View {
 }
 
 #if os(macOS)
-struct SidebarView: View {
-    @Binding var selectedTab: Int
-
-    var body: some View {
-        List(selection: $selectedTab) {
-            NavigationLink(value: 0) {
-                Label("Overview", systemImage: "chart.line.uptrend.xyaxis")
-            }
-            .accessibilityLabel("Overview")
-
-            NavigationLink(value: 1) {
-                Label("Members", systemImage: "person.3.fill")
-            }
-            .accessibilityLabel("Members")
-
-            NavigationLink(value: 2) {
-                Label("Loans", systemImage: "creditcard.fill")
-            }
-            .accessibilityLabel("Loans")
-
-            NavigationLink(value: 3) {
-                Label("Payments", systemImage: "dollarsign.circle.fill")
-            }
-            .accessibilityLabel("Payments")
-
-            NavigationLink(value: 4) {
-                Label("Reports", systemImage: "doc.text.fill")
-            }
-            .accessibilityLabel("Reports")
-        }
-        .navigationTitle("Solidarity Fund")
-        .navigationSplitViewColumnWidth(min: 200, ideal: 250)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Navigation sidebar")
-    }
-}
-
 struct DetailView: View {
     let selectedTab: Int
-    @AppStorage("useLiquidGlass") private var useLiquidGlass: Bool = true
 
     var body: some View {
         switch selectedTab {
-        case 0:
-            if useLiquidGlass {
-                LiquidGlassDashboard()
-            } else {
-                OverviewView()
-            }
-        case 1:
-            MembersListView()
-        case 2:
-            LoansListView()
-        case 3:
-            PaymentsView()
-        case 4:
-            ReportsView()
-        default:
-            if useLiquidGlass {
-                LiquidGlassDashboard()
-            } else {
-                OverviewView()
-            }
+        case 0: LiquidGlassDashboard()
+        case 1: MembersListView()
+        case 2: LoansListView()
+        case 3: PaymentsView()
+        case 4: ReportsView()
+        default: LiquidGlassDashboard()
         }
     }
 }
@@ -176,8 +112,8 @@ struct OverviewView: View {
                             }
                         } label: {
                             if isRecalculating {
-                                ProgressView()
-                                    .scaleEffect(0.8)
+                                Label("Recalculating", systemImage: "arrow.clockwise")
+                                    .symbolEffect(.pulse, options: .repeating)
                             } else {
                                 Label("Recalculate", systemImage: "arrow.clockwise")
                             }
@@ -294,6 +230,8 @@ struct StatCard: View {
             Text(value)
                 .font(.title2)
                 .fontWeight(.semibold)
+                .contentTransition(.numericText())
+                .animation(.snappy, value: value)
         }
         .padding()
         .frame(maxWidth: .infinity)

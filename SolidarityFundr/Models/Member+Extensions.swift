@@ -113,14 +113,34 @@ extension Member {
         let components = calendar.dateComponents([.month], from: joinDate, to: Date())
         return components.month ?? 0
     }
-    
+
+    /// Number of distinct calendar months in which this member made a contribution
+    /// payment. The "3 months of contributions" eligibility rule is about contribution
+    /// count, not calendar tenure — a guard who joined 4 months ago but missed
+    /// payments should not pass.
+    var contributionMonthsCount: Int {
+        let payments = (payments?.allObjects as? [Payment] ?? [])
+            .filter { $0.paymentType == .contribution || $0.contributionAmount > 0 }
+        let calendar = Calendar.current
+        let monthKeys = Set(payments.compactMap { payment -> DateComponents? in
+            guard let date = payment.paymentDate else { return nil }
+            return calendar.dateComponents([.year, .month], from: date)
+        })
+        return monthKeys.count
+    }
+
     var isEligibleForLoan: Bool {
         guard memberStatus == .active else { return false }
-        
-        if memberRole == .securityGuard && monthsAsMember < 3 {
-            return false
+
+        // Guards AND part-time staff need 3 months of actual contributions.
+        // They're grouped together everywhere else (loan limits, repayment terms),
+        // so the eligibility wait should apply consistently to both.
+        if memberRole == .securityGuard || memberRole == .partTime {
+            if contributionMonthsCount < 3 {
+                return false
+            }
         }
-        
+
         return true
     }
     

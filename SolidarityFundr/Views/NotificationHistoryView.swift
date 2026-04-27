@@ -186,7 +186,7 @@ struct NotificationHistoryView: View {
             }
             .padding(12)
             .background(Color.secondary.opacity(0.1))
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             
             // Status Filter
             HStack {
@@ -325,7 +325,7 @@ struct NotificationRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(4)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     
                     Text(notification.recipient ?? "No recipient")
@@ -388,7 +388,7 @@ struct NotificationRow: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     
     private var statusIcon: String {
@@ -441,7 +441,7 @@ struct FilterChip: View {
             .padding(.vertical, 6)
             .background(isSelected ? color.opacity(0.2) : Color.secondary.opacity(0.1))
             .foregroundColor(isSelected ? color : .secondary)
-            .cornerRadius(16)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
     }
@@ -473,7 +473,7 @@ struct NotificationStatCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

@@ -18,50 +18,69 @@ struct MembersListView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
 
+    @State private var memberAddedTrigger = false
+
     var body: some View {
-        GlassContainerCompat {
-            VStack(spacing: 0) {
-                // Statistics Header
-                memberStatisticsHeader
+        NavigationStack {
+            GlassContainerCompat {
+                VStack(spacing: 0) {
+                    memberStatisticsHeader
+                    filterBar
 
-                // Filter Bar
-                filterBar
-
-                // Members List
-                if viewModel.filteredMembers.isEmpty {
-                    emptyStateView
-                } else {
-                    membersList
+                    if viewModel.filteredMembers.isEmpty {
+                        emptyStateView
+                    } else {
+                        membersList
+                    }
                 }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Members list")
-        .sheet(isPresented: $showingAddMember) {
-            AddMemberSheet(viewModel: viewModel)
-        }
-        .alert("Error", isPresented: $viewModel.showingError) {
-            Button("OK") {
-                viewModel.showingError = false
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Members list")
+            .navigationTitle("Members")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingAddMember = true } label: {
+                        Label("Add Member", systemImage: "plus")
+                    }
+                    .accessibilityLabel("Add new member")
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Menu {
+                        Button { viewModel.loadMembers() } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More options")
+                }
             }
-        } message: {
-            Text(viewModel.errorMessage ?? "An error occurred")
+            .searchable(text: $viewModel.searchText, prompt: "Search members")
+            .sheet(isPresented: $showingAddMember) {
+                AddMemberSheet(viewModel: viewModel) { memberAddedTrigger.toggle() }
+            }
+            .sensoryFeedback(.success, trigger: memberAddedTrigger)
+            .alert("Error", isPresented: $viewModel.showingError) {
+                Button("OK") { viewModel.showingError = false }
+            } message: {
+                Text(viewModel.errorMessage ?? "An error occurred")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+                viewModel.loadMembers()
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+                viewModel.loadMembers()
+                refreshID = UUID()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
+                viewModel.loadMembers()
+                refreshID = UUID()
+            }
+            .id(refreshID)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
-            viewModel.loadMembers()
-            refreshID = UUID()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
-            viewModel.loadMembers()
-            refreshID = UUID()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .loanBalanceUpdated)) { _ in
-            viewModel.loadMembers()
-            refreshID = UUID()
-        }
-        .id(refreshID)
     }
 
     private func openMemberDetail(_ member: Member) {
@@ -76,44 +95,17 @@ struct MembersListView: View {
     
     private var memberStatisticsHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Clean header matching Overview style
+            // Title and primary actions are now in .navigationTitle / .toolbar.
             VStack(alignment: .leading, spacing: 8) {
                 Text("Team Management")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                
-                HStack {
-                    Text("Members")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    
-                    Spacer()
-                    
-                    // Toolbar actions with macOS 26 glass styles
-                    Button {
-                        showingAddMember = true
-                    } label: {
-                        Label("Add Member", systemImage: "plus")
-                    }
-                    .buttonStyle(TahoeGlassButtonStyle(isProminent: true))
-                    .accessibleControl(label: "Add new member")
 
-                    Menu {
-                        Button {
-                            viewModel.loadMembers()
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
-                    }
-                    .accessibilityLabel("More options")
-                }
-                
                 Text(Date().formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
                     .foregroundColor(Color.secondary.opacity(0.7))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 16)
@@ -148,19 +140,7 @@ struct MembersListView: View {
     
     private var filterBar: some View {
         VStack(spacing: 0) {
-            // Search bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                TextField("Search members...", text: $viewModel.searchText)
-                    .textFieldStyle(.plain)
-            }
-            .padding(8)
-            .background(Color.secondary.opacity(0.1))
-            .cornerRadius(8)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-            
+            // Native search field is provided by .searchable on the parent view.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     // Role Filter
@@ -182,7 +162,7 @@ struct MembersListView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 
                 // Status Filter
@@ -204,7 +184,7 @@ struct MembersListView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 }
                 .padding(.horizontal, 20)
@@ -380,6 +360,7 @@ struct MemberRowView: View {
 
 struct AddMemberSheet: View {
     @ObservedObject var viewModel: MemberViewModel
+    var onAdded: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
     
@@ -472,6 +453,7 @@ struct AddMemberSheet: View {
                     Button("Add") {
                         viewModel.addMember()
                         if !viewModel.showingError {
+                            onAdded?()
                             dismiss()
                         }
                     }
@@ -512,7 +494,7 @@ struct StatisticCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -527,7 +509,7 @@ struct StatusBadge: View {
             .padding(.vertical, 2)
             .background(backgroundColor)
             .foregroundColor(foregroundColor)
-            .cornerRadius(4)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
     }
     
     private var backgroundColor: Color {

@@ -39,7 +39,7 @@ struct CloudKitStatusView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(syncStatusColor.opacity(0.1))
-        .cornerRadius(6)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .onTapGesture {
             if case .idle = syncManager.syncStatus {
                 syncManager.forceSyncNow()

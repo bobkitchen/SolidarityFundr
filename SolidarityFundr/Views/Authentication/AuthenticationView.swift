@@ -14,6 +14,9 @@ struct AuthenticationView: View {
     @State private var enteredPIN = ""
     @State private var pinError = ""
     @State private var isAuthenticating = false
+    @State private var pinAttempts = 0
+    @State private var pinSuccess = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     var body: some View {
         ZStack {
@@ -67,6 +70,8 @@ struct AuthenticationView: View {
         } message: {
             Text(authManager.authErrorMessage)
         }
+        .sensoryFeedback(.error, trigger: pinAttempts)
+        .sensoryFeedback(.success, trigger: pinSuccess)
         .onAppear {
             if !showingPINEntry {
                 authenticateWithBiometrics()
@@ -81,29 +86,20 @@ struct AuthenticationView: View {
             Image(systemName: authManager.biometricType.iconName)
                 .font(.system(size: 60))
                 .foregroundColor(.accentColor)
-                .opacity(isAuthenticating ? 0.5 : 1.0)
-                .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: isAuthenticating)
-            
+                .symbolEffect(.pulse, options: .repeating, isActive: isAuthenticating && !reduceMotion)
+
             VStack(spacing: 10) {
                 Text("Authentication Required")
                     .font(.headline)
-                
+
                 Text("Use \(authManager.biometricType.displayName) to access your fund data")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
-            
-            Button(action: authenticateWithBiometrics) {
-                Label("Authenticate", systemImage: authManager.biometricType.iconName)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(width: 200)
-                    .padding()
-                    .background(Color.accentColor)
-                    .cornerRadius(10)
-            }
-            .disabled(isAuthenticating)
+
+            authenticateButton
+                .disabled(isAuthenticating)
             
             if PINManager.shared.hasPIN() {
                 Button("Use PIN Instead") {
@@ -115,6 +111,30 @@ struct AuthenticationView: View {
         }
     }
     
+    /// Native Liquid Glass prominent button on macOS 26+, fallback styled below.
+    @ViewBuilder
+    private var authenticateButton: some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            Button(action: authenticateWithBiometrics) {
+                Label("Authenticate", systemImage: authManager.biometricType.iconName)
+                    .font(.headline)
+                    .frame(width: 200)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.glassProminent)
+        } else {
+            Button(action: authenticateWithBiometrics) {
+                Label("Authenticate", systemImage: authManager.biometricType.iconName)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(width: 200)
+                    .padding()
+                    .background(Color.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+    }
+
     // MARK: - PIN Entry View
     
     private var pinEntryView: some View {
@@ -122,6 +142,7 @@ struct AuthenticationView: View {
             Image(systemName: "lock.circle.fill")
                 .font(.system(size: 60))
                 .foregroundColor(.accentColor)
+                .symbolEffect(.bounce, value: pinAttempts)
             
             VStack(spacing: 10) {
                 Text("Enter PIN")
@@ -191,21 +212,32 @@ struct AuthenticationView: View {
     
     // MARK: - Helper Methods
     
+    @ViewBuilder
     private func numberButton(_ number: String) -> some View {
-        Button(action: {
-            if enteredPIN.count < 6 {
-                enteredPIN.append(number)
-                
-                if enteredPIN.count >= 4 {
-                    validatePIN()
-                }
+        if #available(macOS 26.0, iOS 26.0, *) {
+            Button(action: { tapNumber(number) }) {
+                Text(number)
+                    .font(.title)
+                    .frame(width: 60, height: 60)
             }
-        }) {
-            Text(number)
-                .font(.title)
-                .frame(width: 60, height: 60)
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(30)
+            .buttonStyle(.glass)
+            .clipShape(Circle())
+        } else {
+            Button(action: { tapNumber(number) }) {
+                Text(number)
+                    .font(.title)
+                    .frame(width: 60, height: 60)
+                    .background(Color.gray.opacity(0.2))
+                    .clipShape(RoundedRectangle(cornerRadius: 30))
+            }
+        }
+    }
+
+    private func tapNumber(_ number: String) {
+        guard enteredPIN.count < 6 else { return }
+        enteredPIN.append(number)
+        if enteredPIN.count >= 4 {
+            validatePIN()
         }
     }
     
@@ -224,16 +256,13 @@ struct AuthenticationView: View {
     
     private func validatePIN() {
         if PINManager.shared.verifyPIN(enteredPIN) {
+            pinSuccess.toggle() // Triggers .success sensory feedback.
             authManager.authenticateWithPIN()
         } else {
             pinError = "Incorrect PIN"
             enteredPIN = ""
-            
-            // Add haptic feedback for error on iOS only
-            #if os(iOS)
-            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-            impactFeedback.impactOccurred()
-            #else
+            pinAttempts &+= 1 // Triggers .error sensory feedback (cross-platform).
+            #if os(macOS)
             NSSound.beep()
             #endif
         }

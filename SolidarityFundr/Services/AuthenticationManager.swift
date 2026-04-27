@@ -19,7 +19,6 @@ class AuthenticationManager: ObservableObject {
     @Published var showingAuthError = false
     @Published var authErrorMessage = ""
     
-    private let context = LAContext()
     private let keychainService = KeychainService()
     
     enum AuthenticationError: LocalizedError {
@@ -52,8 +51,11 @@ class AuthenticationManager: ObservableObject {
     // MARK: - Biometric Setup
     
     func checkBiometricAvailability() {
+        // Always create a fresh LAContext — a stored instance becomes stale when
+        // the user changes biometric enrollment, causing biometryType to lie.
+        let context = LAContext()
         var error: NSError?
-        
+
         if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
             biometricType = context.biometryType
         } else {

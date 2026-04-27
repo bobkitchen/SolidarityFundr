@@ -195,7 +195,7 @@ struct MemberDetailView: View {
         .padding()
         .frame(maxWidth: .infinity)
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
     }
     
@@ -367,7 +367,7 @@ struct QuickActionButton: View {
             .padding(.vertical, 12)
             .background(color.opacity(0.1))
             .foregroundColor(color)
-            .cornerRadius(10)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 }
@@ -417,7 +417,7 @@ struct ContactInfoCard: View {
                         .padding(.vertical, 2)
                         .background(Color.green.opacity(0.2))
                         .foregroundColor(.green)
-                        .cornerRadius(4)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
                     Text("Disabled")
                         .font(.caption)
@@ -425,7 +425,7 @@ struct ContactInfoCard: View {
                         .padding(.vertical, 2)
                         .background(Color.gray.opacity(0.2))
                         .foregroundColor(.gray)
-                        .cornerRadius(4)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
             
@@ -444,7 +444,7 @@ struct ContactInfoCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -495,7 +495,7 @@ struct FinancialSummaryCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -535,7 +535,7 @@ struct LoanEligibilityCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     private var eligibilityReason: String {
@@ -571,7 +571,7 @@ struct ContributionChartCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -608,7 +608,7 @@ struct ContributionHistoryList: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -660,7 +660,7 @@ struct LoanCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -687,7 +687,7 @@ struct TransactionRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal)
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

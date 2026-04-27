@@ -3,6 +3,7 @@ import CoreData
 
 // MARK: - Statement Service
 
+@MainActor
 class StatementService: ObservableObject {
     static let shared = StatementService()
     

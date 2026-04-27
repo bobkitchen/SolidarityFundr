@@ -17,6 +17,7 @@ struct LoanDetailView: View {
     @State private var showingPaymentForm = false
     @State private var showingCompleteLoanConfirmation = false
     @State private var showingEditSheet = false
+    @State private var loanCompletedTrigger = false
     
     private var loanSummary: LoanSummary? {
         viewModel.getLoanSummary(loan)
@@ -89,11 +90,13 @@ struct LoanDetailView: View {
         ) {
             Button("Mark as Complete") {
                 viewModel.completeLoan(loan)
+                loanCompletedTrigger.toggle()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will mark the loan as fully paid. This action cannot be undone.")
         }
+        .sensoryFeedback(.success, trigger: loanCompletedTrigger)
         .onAppear {
             viewModel.selectLoan(loan)
         }
@@ -181,7 +184,7 @@ struct LoanDetailView: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
     }
     
@@ -314,7 +317,7 @@ struct LoanStatusBadge: View {
         .padding(.vertical, 6)
         .background(backgroundColor)
         .foregroundColor(foregroundColor)
-        .cornerRadius(20)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
     private var statusIcon: String {
@@ -395,7 +398,7 @@ struct LoanInfoCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -434,7 +437,7 @@ struct PaymentSummaryCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -453,7 +456,7 @@ struct NotesCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -489,7 +492,7 @@ struct PaymentScheduleRow: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .opacity(isPaid ? 0.6 : 1)
     }
 }
@@ -531,7 +534,7 @@ struct PaymentHistoryRow: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

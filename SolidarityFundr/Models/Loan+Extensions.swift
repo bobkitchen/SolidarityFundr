@@ -45,7 +45,10 @@ extension Loan {
     }
     
     func calculateMonthlyPayment() -> Double {
-        return amount / Double(repaymentMonths)
+        // Round to whole KSH so the schedule shown to members matches arithmetic.
+        // KSH 10,000 / 6 → 1666.67 raw → 1667 charged.
+        guard repaymentMonths > 0 else { return 0 }
+        return (amount / Double(repaymentMonths)).rounded(.toNearestOrAwayFromZero)
     }
     
     func processPayment(amount: Double) -> (loanRepayment: Double, contribution: Double) {

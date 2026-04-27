@@ -19,6 +19,10 @@ struct SolidarityFundrApp: App {
     @StateObject private var dataManager = DataManager.shared
     @StateObject private var authManager = AuthenticationManager.shared
 
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(WindowConfigurator.self) private var windowConfigurator
+    #endif
+
     var body: some Scene {
         // MARK: - Main Window
         WindowGroup {
@@ -53,8 +57,11 @@ struct SolidarityFundrApp: App {
             #endif
         }
         #if os(macOS)
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unified)
+        // Keep the title bar (so traffic lights have a proper frame anchor) but
+        // make it transparent and full-size-content via WindowConfigurator.
+        // `.hiddenTitleBar` removes the chrome that anchors traffic lights.
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {

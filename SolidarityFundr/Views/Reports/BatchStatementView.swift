@@ -152,7 +152,7 @@ struct BatchStatementView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.ultraThinMaterial)
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             
             Spacer()
         }
@@ -188,7 +188,7 @@ struct BatchStatementView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(.ultraThinMaterial)
-                .cornerRadius(6)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
         }
@@ -357,13 +357,13 @@ struct MemberSelectionRow: View {
                         .padding(.vertical, 2)
                         .background(Color.red.opacity(0.2))
                         .foregroundColor(.red)
-                        .cornerRadius(4)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(isHovered ? Color.secondary.opacity(0.08) : Color.clear)
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .onHover { hovering in
@@ -389,7 +389,7 @@ struct FilterButton: View {
             .padding(.vertical, 4)
             .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.1))
             .foregroundColor(isSelected ? .white : .primary)
-            .cornerRadius(6)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
     }

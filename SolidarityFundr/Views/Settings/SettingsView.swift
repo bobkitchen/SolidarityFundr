@@ -665,7 +665,7 @@ struct MessagingSettingsView: View {
                                 .padding(.vertical, 8)
                                 .padding(.horizontal, 12)
                                 .background(Color.secondary.opacity(0.1))
-                                .cornerRadius(8)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
@@ -775,7 +775,7 @@ struct MessagingSettingsView: View {
                 }
                 .padding()
                 .background(Color.secondary.opacity(0.1))
-                .cornerRadius(10)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             
             // Info Section
@@ -790,7 +790,7 @@ struct MessagingSettingsView: View {
             }
             .padding()
             .background(Color.secondary.opacity(0.1))
-            .cornerRadius(10)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .onAppear {
             loadSettings()

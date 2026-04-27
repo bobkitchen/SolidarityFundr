@@ -103,13 +103,13 @@ struct ValidationHelper {
     
     static func validatePaymentAmount(_ amount: Double, forLoan: Bool) -> ValidationResult {
         var errors: [String] = []
-        
+
         if amount <= 0 {
             errors.append("Amount must be greater than zero")
-        } else if forLoan && amount < 2000 {
-            errors.append("Loan payments must be at least KSH 2,000")
         }
-        
+        // No KSH 2,000 minimum: a final balloon payment for a loan remainder may
+        // legitimately be smaller than the regular monthly amount.
+
         return ValidationResult(isValid: errors.isEmpty, errors: errors, warnings: [])
     }
     

@@ -16,59 +16,78 @@ struct PaymentsView: View {
     @State private var showingDeleteConfirmation = false
     @State private var paymentToDelete: Payment?
 
+    @State private var paymentSavedTrigger = false
+
     var body: some View {
-        GlassContainerCompat {
-            VStack(spacing: 0) {
-                // Summary Header
-                paymentSummaryHeader
+        NavigationStack {
+            GlassContainerCompat {
+                VStack(spacing: 0) {
+                    paymentSummaryHeader
+                    dateRangeFilter
+                    filterBar
 
-                // Date Range Filter
-                dateRangeFilter
-
-                // Filter Options
-                filterBar
-
-                // Payments List
-                if viewModel.filteredPayments.isEmpty {
-                    emptyStateView
-                } else {
-                    paymentsList
+                    if viewModel.filteredPayments.isEmpty {
+                        emptyStateView
+                    } else {
+                        paymentsList
+                    }
                 }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Payments list")
-        .sheet(isPresented: $showingNewPayment) {
-            PaymentFormView(viewModel: viewModel)
-        }
-        // Edit window is now handled by PaymentEditWindowController
-        .onAppear {
-            viewModel.loadPayments()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
-            viewModel.loadPayments()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
-            viewModel.loadPayments()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
-            viewModel.loadPayments()
-        }
-        .confirmationDialog(
-            "Delete Payment",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                if let payment = paymentToDelete {
-                    viewModel.deletePayment(payment)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Payments list")
+            .navigationTitle("Payments")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingNewPayment = true } label: {
+                        Label("New Payment", systemImage: "plus")
+                    }
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Menu {
+                        Button { viewModel.loadPayments() } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        Divider()
+                        Button { exportPayments() } label: {
+                            Label("Export CSV", systemImage: "square.and.arrow.up")
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
                 }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to delete this payment? This action cannot be undone.")
+            .searchable(text: $viewModel.searchText, prompt: "Search by member name")
+            .sheet(isPresented: $showingNewPayment) {
+                PaymentFormView(viewModel: viewModel)
+            }
+            .sensoryFeedback(.success, trigger: paymentSavedTrigger)
+            .onAppear { viewModel.loadPayments() }
+            .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
+                viewModel.loadPayments()
+                paymentSavedTrigger.toggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .transactionsUpdated)) { _ in
+                viewModel.loadPayments()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { _ in
+                viewModel.loadPayments()
+            }
+            .confirmationDialog(
+                "Delete Payment",
+                isPresented: $showingDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let payment = paymentToDelete {
+                        viewModel.deletePayment(payment)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Are you sure you want to delete this payment? This action cannot be undone.")
+            }
         }
     }
     
@@ -76,49 +95,17 @@ struct PaymentsView: View {
     
     private var paymentSummaryHeader: some View {
         VStack(spacing: 12) {
-            // Clean header matching Overview style
+            // Title and primary actions are now in .navigationTitle / .toolbar.
             VStack(alignment: .leading, spacing: 8) {
                 Text("Financial Records")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                
-                HStack {
-                    Text("Payments")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    
-                    Spacer()
-                    
-                    // Toolbar actions
-                    Button {
-                        showingNewPayment = true
-                    } label: {
-                        Label("New Payment", systemImage: "plus")
-                    }
-                    
-                    Menu {
-                        Button {
-                            viewModel.loadPayments()
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        
-                        Divider()
-                        
-                        Button {
-                            exportPayments()
-                        } label: {
-                            Label("Export CSV", systemImage: "square.and.arrow.up")
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
-                    }
-                }
-                
+
                 Text(Date().formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
                     .foregroundColor(Color.secondary.opacity(0.7))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 16)
@@ -178,29 +165,17 @@ struct PaymentsView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
-        .onChange(of: viewModel.startDate) { _ in
+        .onChange(of: viewModel.startDate) {
             viewModel.loadPayments()
         }
-        .onChange(of: viewModel.endDate) { _ in
+        .onChange(of: viewModel.endDate) {
             viewModel.loadPayments()
         }
     }
     
     private var filterBar: some View {
         VStack(spacing: 0) {
-            // Search bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                TextField("Search by member name...", text: $viewModel.searchText)
-                    .textFieldStyle(.plain)
-            }
-            .padding(8)
-            .background(Color.secondary.opacity(0.1))
-            .cornerRadius(8)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-            
+            // Native search field is provided by .searchable on the parent view.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     // Payment Type Filter
@@ -222,7 +197,7 @@ struct PaymentsView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 
                 // Payment Method Filter
@@ -244,7 +219,7 @@ struct PaymentsView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 }
                 .padding(.horizontal, 20)
@@ -457,7 +432,7 @@ struct SummaryCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

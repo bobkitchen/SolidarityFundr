@@ -71,7 +71,7 @@ struct FundSummaryReport: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     // MARK: - Fund Overview Section
@@ -142,7 +142,7 @@ struct FundSummaryReport: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     // Summary stats
@@ -154,7 +154,7 @@ struct FundSummaryReport: View {
                     }
                     .padding()
                     .background(Color.secondary.opacity(0.05))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     
                     // Active loans list
                     ForEach(activeLoansData, id: \.member) { loan in
@@ -291,7 +291,7 @@ struct FundSummaryReport: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     // MARK: - Export Section
@@ -320,7 +320,7 @@ struct FundSummaryReport: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     // MARK: - Helper Methods
@@ -390,7 +390,7 @@ private struct MetricCard: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

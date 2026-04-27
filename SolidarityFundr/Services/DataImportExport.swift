@@ -11,7 +11,10 @@ import CoreData
 class DataImportExport {
     static let shared = DataImportExport()
     
-    private let context = PersistenceController.shared.container.viewContext
+    private let persistenceController = PersistenceController.shared
+    private var context: NSManagedObjectContext {
+        persistenceController.container.viewContext
+    }
     private let dateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         return formatter
@@ -146,29 +149,54 @@ class DataImportExport {
     
     // MARK: - Import
     
+    /// Import is atomic: snapshot existing data first, then if any step fails,
+    /// re-import the snapshot. NSBatchDeleteRequest writes directly to the store,
+    /// so manual rollback is required to honor the documented rollback contract.
     func importData(from data: Data) throws {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        
+
         let importData = try decoder.decode(ExportData.self, from: data)
-        
-        // Validate version compatibility
+
         guard importData.version == "1.0" else {
             throw ImportError.incompatibleVersion
         }
-        
-        // Clear existing data (optional - could merge instead)
+
+        // 1. Snapshot existing store as ExportData so we can recover on failure.
+        let snapshotData = try exportData()
+
+        do {
+            try performImport(importData)
+        } catch {
+            // 2. Roll back: clear partial state and re-import the snapshot.
+            do {
+                try clearAllData()
+                let snapshot = try Self.iso8601Decoder.decode(ExportData.self, from: snapshotData)
+                try performImport(snapshot)
+            } catch let rollbackError {
+                throw ImportError.rollbackFailed(originalError: error, rollbackError: rollbackError)
+            }
+            throw error
+        }
+    }
+
+    private func performImport(_ importData: ExportData) throws {
         try clearAllData()
-        
-        // Import in order to maintain relationships
+
         try importFundSettings(importData.fundSettings)
         let memberMapping = try importMembers(importData.members)
         try importLoans(importData.loans, memberMapping: memberMapping)
         try importPayments(importData.payments, memberMapping: memberMapping)
         try importTransactions(importData.transactions, memberMapping: memberMapping)
-        
+
         try context.save()
     }
+
+    private static let iso8601Decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
     
     private func clearAllData() throws {
         let entities = ["Transaction", "Payment", "Loan", "Member", "FundSettings"]
@@ -401,7 +429,8 @@ enum ImportError: LocalizedError {
     case incompatibleVersion
     case corruptedData
     case missingRequiredData
-    
+    case rollbackFailed(originalError: Error, rollbackError: Error)
+
     var errorDescription: String? {
         switch self {
         case .incompatibleVersion:
@@ -410,6 +439,8 @@ enum ImportError: LocalizedError {
             return "The import file appears to be corrupted"
         case .missingRequiredData:
             return "The import file is missing required data"
+        case .rollbackFailed(let originalError, let rollbackError):
+            return "Import failed (\(originalError.localizedDescription)) AND rollback also failed (\(rollbackError.localizedDescription)). Restore from a backup."
         }
     }
 }

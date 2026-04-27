@@ -8,6 +8,7 @@
 import Foundation
 import CoreData
 import Combine
+import os.log
 
 class DataManager: ObservableObject {
     static let shared = DataManager()
@@ -20,6 +21,9 @@ class DataManager: ObservableObject {
     @Published var activeLoans: [Loan] = []
     @Published var allLoans: [Loan] = []
     @Published var recentTransactions: [Transaction] = []
+    /// Most recent Core Data save error. UI can observe this to surface failures
+    /// instead of letting them fail silently into stderr.
+    @Published var lastSaveError: Error?
     
     private var cancellables = Set<AnyCancellable>()
     private var isSaving = false
@@ -665,17 +669,25 @@ class DataManager: ObservableObject {
     // MARK: - Fund Operations
     
     func applyAnnualInterest() {
-        fundSettings?.applyAnnualInterest()
-        
-        let interestAmount = (fundSettings?.totalInterestApplied ?? 0) - ((fundSettings?.totalInterestApplied ?? 0) - (fundSettings?.calculateFundBalance() ?? 0) * (fundSettings?.annualInterestRate ?? 0.13))
-        
+        guard let settings = fundSettings else { return }
+
+        // Compute interest from the PRE-mutation balance so the recorded
+        // transaction amount equals the actual accrual. The previous
+        // double-subtraction formula happened to cancel arithmetically but
+        // read post-mutation state.
+        let preInterestBalance = settings.calculateFundBalance()
+        let rate = settings.annualInterestRate
+        let interestAmount = preInterestBalance * rate
+
+        settings.applyAnnualInterest()
+
         createTransaction(
             for: nil,
             amount: interestAmount,
             type: .interestApplied,
-            description: "Annual interest applied at \(Int((fundSettings?.annualInterestRate ?? 0.13) * 100))%"
+            description: "Annual interest applied at \(Int(rate * 100))%"
         )
-        
+
         saveContext()
     }
     
@@ -783,16 +795,29 @@ class DataManager: ObservableObject {
     // MARK: - Core Data
     
     private func saveContext() {
-        if context.hasChanges {
-            isSaving = true
-            do {
-                try context.save()
-            } catch {
-                print("Error saving context: \(error)")
+        guard context.hasChanges else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try context.save()
+            // Clear any prior error on successful save.
+            if lastSaveError != nil {
+                DispatchQueue.main.async { [weak self] in self?.lastSaveError = nil }
             }
-            isSaving = false
+        } catch {
+            // Surface to UI so the user sees a financial-data save failure rather
+            // than continuing with diverged in-memory state. Logged at fault level.
+            os_log(.fault, log: .dataManager, "Core Data save failed: %{public}@", error.localizedDescription)
+            DispatchQueue.main.async { [weak self] in
+                self?.lastSaveError = error
+            }
+            assertionFailure("Core Data save failed: \(error)")
         }
     }
+}
+
+extension OSLog {
+    static let dataManager = OSLog(subsystem: "com.solidarityfundr.app", category: "DataManager")
 }
 
 // MARK: - Error Types

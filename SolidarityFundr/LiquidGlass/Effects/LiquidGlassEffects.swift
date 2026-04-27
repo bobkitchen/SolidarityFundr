@@ -238,7 +238,9 @@ extension View {
         ))
     }
 
-    /// Apply performant glass background
+    /// Apply a glass background. On macOS 26+/iOS 26+ uses native Liquid Glass
+    /// via `glassEffect`; on earlier OS versions falls back to a Material-based
+    /// layer that approximates the look.
     @ViewBuilder
     func performantGlass(
         material: Material = .ultraThinMaterial,
@@ -246,39 +248,68 @@ extension View {
         strokeWidth: CGFloat = 0.5,
         strokeOpacity: Double = 0.1
     ) -> some View {
-        self.background(
-            PerformantGlassLayer(
-                material: material,
-                cornerRadius: cornerRadius,
-                strokeWidth: strokeWidth,
-                strokeOpacity: strokeOpacity
+        if #available(macOS 26.0, iOS 26.0, *) {
+            self.glassEffect(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            self.background(
+                PerformantGlassLayer(
+                    material: material,
+                    cornerRadius: cornerRadius,
+                    strokeWidth: strokeWidth,
+                    strokeOpacity: strokeOpacity
+                )
             )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
     }
 
-    /// Apply native glass effect
+    /// Apply a native glass effect (alias of `performantGlass` with defaults).
     @ViewBuilder
     func nativeGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusMedium) -> some View {
-        self.background(
-            PerformantGlassLayer(
-                material: .ultraThinMaterial,
-                cornerRadius: cornerRadius
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        self.performantGlass(material: .ultraThinMaterial, cornerRadius: cornerRadius)
     }
 
-    /// Apply interactive glass (for buttons and controls)
+    /// Apply interactive glass for buttons and controls. On macOS 26+ uses
+    /// `.glassEffect(.regular.interactive())` which provides built-in scale,
+    /// shimmer, and touch-point illumination.
     @ViewBuilder
     func interactiveGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) -> some View {
-        self.background(
-            PerformantGlassLayer(
-                material: .thinMaterial,
-                cornerRadius: cornerRadius
+        if #available(macOS 26.0, iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            self.background(
+                PerformantGlassLayer(
+                    material: .thinMaterial,
+                    cornerRadius: cornerRadius
+                )
             )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
+    }
+}
+
+// MARK: - Tiered Glass Modifiers
+//
+// Replacements for the legacy LiquidGlassMaterial.swift `primaryGlass`/
+// `secondaryGlass`/`tertiaryGlass` modifiers. These now route through the
+// native gate in `performantGlass` so on macOS 26+ they render as real
+// Liquid Glass, falling back to `Material` on earlier OS versions.
+// No hardcoded shadows — the system handles edge effects.
+
+extension View {
+    @ViewBuilder
+    func primaryGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusLarge) -> some View {
+        self.performantGlass(material: .ultraThinMaterial, cornerRadius: cornerRadius)
+    }
+
+    @ViewBuilder
+    func secondaryGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusMedium) -> some View {
+        self.performantGlass(material: .regularMaterial, cornerRadius: cornerRadius)
+    }
+
+    @ViewBuilder
+    func tertiaryGlass(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) -> some View {
+        self.performantGlass(material: .thinMaterial, cornerRadius: cornerRadius)
     }
 }
 
