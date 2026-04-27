@@ -12,114 +12,58 @@ import LocalAuthentication
 struct SettingsView: View {
     @EnvironmentObject var dataManager: DataManager
     @StateObject private var syncManager = CloudKitSyncManager.shared
-    @State private var selectedTab = SettingsTab.general
-    @State private var searchText = ""
-    @State private var isSearchActive = false
-    @State private var searchResults: [SearchResult] = []
-    
+
     // Alert states
     @State private var showingSuccessAlert = false
     @State private var successMessage = ""
     @State private var showingMessage = false
     @State private var alertMessage = ""
     @State private var showingResetConfirmation = false
-    
+
     // Import/Export states
     @State private var showingImport = false
     @State private var showingExport = false
-    
-    // Settings states moved to relevant tab view models
-    
-    init() {
-        print("🔧 SettingsView: init called")
-    }
-    
-    enum SettingsTab: String, CaseIterable {
+
+    enum SettingsTab: String, CaseIterable, Hashable {
         case general = "General"
         case messaging = "Messaging"
         case security = "Security"
         case dataSync = "Data & Sync"
         case advanced = "Advanced"
-        
+
         var icon: String {
             switch self {
             case .general: return "gear"
-            case .messaging: return "message.fill"
-            case .security: return "lock.shield.fill"
-            case .dataSync: return "icloud.and.arrow.up.fill"
-            case .advanced: return "wrench.and.screwdriver.fill"
-            }
-        }
-        
-        var description: String {
-            switch self {
-            case .general: return "Fund configuration and business rules"
-            case .messaging: return "WhatsApp statement delivery"
-            case .security: return "Authentication and privacy"
-            case .dataSync: return "iCloud sync and data management"
-            case .advanced: return "Interest, notifications, and developer options"
+            case .messaging: return "message"
+            case .security: return "lock.shield"
+            case .dataSync: return "icloud.and.arrow.up"
+            case .advanced: return "wrench.and.screwdriver"
             }
         }
     }
-    
-    struct SearchResult: Identifiable {
-        let id = UUID()
-        let title: String
-        let description: String
-        let tab: SettingsTab
-        let icon: String
-    }
-    
+
     var body: some View {
-        let _ = print("🔧 SettingsView: body called")
-        
-        VStack(spacing: 0) {
-            // Header with Quick Actions
-            headerView
-            
-            // Tab Navigation
-            tabNavigationView
-            
-            // Search Bar (shown when search is active)
-            if isSearchActive {
-                searchBarView
-            }
-            
-            // Tab Content or Search Results
-            if isSearchActive && !searchText.isEmpty {
-                searchResultsView
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: DesignSystem.spacingLarge) {
-                        switch selectedTab {
-                        case .general:
-                            GeneralSettingsView(dataManager: dataManager)
-                        case .messaging:
-                            MessagingSettingsView(dataManager: dataManager)
-                        case .security:
-                            SecuritySettingsTabView()
-                        case .dataSync:
-                            DataSyncSettingsView(
-                                dataManager: dataManager,
-                                syncManager: syncManager,
-                                showingImport: $showingImport,
-                                showingExport: $showingExport,
-                                showingResetConfirmation: $showingResetConfirmation
-                            )
-                        case .advanced:
-                            AdvancedSettingsView(dataManager: dataManager)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(DesignSystem.marginStandard)
-                }
-            }
+        // Stock macOS Settings: a TabView at the window root, each tab wrapped
+        // in a Form with `.formStyle(.grouped)` so it renders with the system
+        // Settings appearance (grouped GroupBox sections, proper spacing,
+        // Liquid Glass on macOS 26).
+        TabView {
+            tab(GeneralSettingsView(dataManager: dataManager), .general)
+            tab(MessagingSettingsView(dataManager: dataManager), .messaging)
+            tab(SecuritySettingsTabView(), .security)
+            tab(
+                DataSyncSettingsView(
+                    dataManager: dataManager,
+                    syncManager: syncManager,
+                    showingImport: $showingImport,
+                    showingExport: $showingExport,
+                    showingResetConfirmation: $showingResetConfirmation
+                ),
+                .dataSync
+            )
+            tab(AdvancedSettingsView(dataManager: dataManager), .advanced)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
-        .onAppear {
-            print("🔧 SettingsView: onAppear called")
-        }
+        .frame(minWidth: 560, idealWidth: 640, minHeight: 460, idealHeight: 560)
         .alert("Success", isPresented: $showingSuccessAlert) {
             Button("OK") {}
         } message: {
@@ -158,208 +102,26 @@ struct SettingsView: View {
             Text("This will permanently delete all members, loans, payments, and transactions. This action cannot be undone.")
         }
     }
-    
-    // MARK: - View Components
-    
-    private var headerView: some View {
-        HStack {
-            Spacer()
 
-            // Quick Actions
-            HStack(spacing: DesignSystem.spacingMedium) {
-                // Search Toggle
-                SettingsQuickActionButton(
-                    icon: "magnifyingglass",
-                    isActive: isSearchActive,
-                    action: {
-                        isSearchActive.toggle()
-                        if !isSearchActive {
-                            searchText = ""
-                            searchResults = []
-                        }
-                    }
-                )
-                .help("Search settings")
+    // MARK: - Helpers
 
-                // Quick Action Menu
-                Menu {
-                    Button {
-                        if let fundSettings = dataManager.fundSettings {
-                            let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
-                            if potentialInterest > 0 {
-                                dataManager.applyAnnualInterest()
-                                successMessage = "Annual interest applied successfully"
-                                showingSuccessAlert = true
-                            }
-                        }
-                    } label: {
-                        Label("Apply Annual Interest", systemImage: "percent")
-                    }
-
-                    Button {
-                        selectedTab = .messaging
-                    } label: {
-                        Label("Send Test Message", systemImage: "message.badge.filled.fill")
-                    }
-
-                    Divider()
-
-                    Button {
-                        showingExport = true
-                    } label: {
-                        Label("Export Backup", systemImage: "square.and.arrow.up")
-                    }
-
-                    Button {
-                        showingImport = true
-                    } label: {
-                        Label("Import Data", systemImage: "square.and.arrow.down")
-                    }
-                } label: {
-                    SettingsQuickActionButton(icon: "ellipsis.circle", isActive: false, action: {})
-                }
-                .buttonStyle(.plain)
-            }
+    @ViewBuilder
+    private func tab<Content: View>(_ content: Content, _ tab: SettingsTab) -> some View {
+        Form {
+            content
         }
-        .padding(.horizontal, DesignSystem.marginStandard)
-        .padding(.top, DesignSystem.spacingMedium)
-        .padding(.bottom, DesignSystem.spacingSmall)
+        .formStyle(.grouped)
+        .tabItem { Label(tab.rawValue, systemImage: tab.icon) }
     }
-    
-    private var tabNavigationView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DesignSystem.spacingLarge) {
-                ForEach(SettingsTab.allCases, id: \.self) { tab in
-                    TabButton(
-                        tab: tab,
-                        isSelected: selectedTab == tab,
-                        action: { 
-                            selectedTab = tab
-                        }
-                    )
-                }
-            }
-            .padding(.horizontal, DesignSystem.marginStandard)
-        }
-        .padding(.bottom, DesignSystem.spacingMedium)
-    }
-    
-    private var searchBarView: some View {
-        HStack(spacing: DesignSystem.spacingSmall) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondaryText)
-                .font(DesignSystem.Typography.body)
-            
-            TextField("Search settings...", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(DesignSystem.Typography.body)
-                .onChange(of: searchText) { _, _ in
-                    performSearch()
-                }
-                .onSubmit {
-                    performSearch()
-                }
-            
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                    searchResults = []
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondaryText)
-                        .font(DesignSystem.Typography.body)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(DesignSystem.spacingSmall)
-        .performantGlass(
-            material: DesignSystem.glassOverlay,
-            cornerRadius: DesignSystem.cornerRadiusSmall
-        )
-        .padding(.horizontal, DesignSystem.marginStandard)
-        .padding(.bottom, DesignSystem.spacingMedium)
-        .transition(.move(edge: .top).combined(with: .opacity))
-    }
-    
-    private var searchResultsView: some View {
-        ScrollView {
-            VStack(spacing: DesignSystem.spacingMedium) {
-                if searchResults.isEmpty && !searchText.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Results", systemImage: "magnifyingglass")
-                    } description: {
-                        Text("No settings match '\(searchText)'")
-                    }
-                    .frame(height: 300)
-                } else {
-                    ForEach(searchResults) { result in
-                        SearchResultRow(result: result) {
-                            withAnimation(DesignSystem.subtleSpring) {
-                                selectedTab = result.tab
-                                isSearchActive = false
-                                searchText = ""
-                                searchResults = []
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(DesignSystem.marginStandard)
-        }
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func performSearch() {
-        let query = searchText.lowercased()
-        guard !query.isEmpty else {
-            searchResults = []
-            return
-        }
-        
-        // Define all searchable settings
-        let allSettings: [(String, String, SettingsTab, String)] = [
-            // General tab
-            ("Monthly Contribution", "Set the monthly contribution amount", .general, "calendar.badge.plus"),
-            ("Annual Interest Rate", "Configure fund interest rate", .general, "percent"),
-            ("Utilization Warning", "Set fund utilization threshold", .general, "exclamationmark.triangle"),
-            ("Minimum Fund Balance", "Set minimum balance requirement", .general, "chart.line.downtrend.xyaxis"),
-            ("Business Rules", "Override warnings and settings", .general, "doc.text.fill"),
-            
-            // Messaging tab
-            ("WhatsApp Statements", "Monthly WhatsApp statement settings", .messaging, "message"),
-            ("Statement Schedule", "Configure when statements are sent", .messaging, "calendar"),
-            ("Test Message", "Send test messages", .messaging, "paperplane"),
-            ("Delivery History", "View message delivery logs", .messaging, "clock.arrow.circlepath"),
-            
-            // Security tab
-            ("Authentication", "Biometric and password settings", .security, "lock.shield"),
-            ("Log Out", "Sign out of the application", .security, "rectangle.portrait.and.arrow.right"),
-            
-            // Data & Sync tab
-            ("iCloud Sync", "Automatic data synchronization", .dataSync, "icloud"),
-            ("Import Data", "Import from backup files", .dataSync, "square.and.arrow.down"),
-            ("Export Backup", "Create data backups", .dataSync, "square.and.arrow.up"),
-            ("Auto-Backup", "Schedule automatic backups", .dataSync, "clock.badge.checkmark"),
-            
-            // Advanced tab
-            ("Interest Management", "Apply annual interest", .advanced, "percent"),
-            ("Notifications", "Payment and alert settings", .advanced, "bell"),
-            ("Display Preferences", "Date format and UI settings", .advanced, "paintbrush"),
-            ("Liquid Glass Design", "Enable new design system", .advanced, "sparkles"),
-            ("Documentation", "View app documentation", .advanced, "doc.text")
-        ]
-        
-        // Filter results based on query
-        searchResults = allSettings.compactMap { (title, description, tab, icon) in
-            if title.lowercased().contains(query) || description.lowercased().contains(query) {
-                return SearchResult(title: title, description: description, tab: tab, icon: icon)
-            }
-            return nil
-        }
-    }
-    
+
+    // MARK: - Removed in stock-Settings refactor
+    //
+    // The previous wrapper had a custom horizontal tab bar (TabButton),
+    // a search field with live results (SearchResult/performSearch), a
+    // quick-actions menu in the header, and Material-backed "card" frames
+    // around tab content. All of that is now provided by stock SwiftUI's
+    // TabView + Form on macOS, so it's been removed.
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -414,49 +176,6 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Tab Button Component
-
-struct TabButton: View {
-    let tab: SettingsView.SettingsTab
-    let isSelected: Bool
-    let action: () -> Void
-    @State private var isHovered = false
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: DesignSystem.spacingSmall) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 22, weight: isSelected ? .semibold : .medium))
-                    .foregroundColor(isSelected ? .accentColor : .secondaryText)
-                    .scaleEffect(isHovered ? 1.05 : 1.0)
-                
-                Text(tab.rawValue)
-                    .font(isSelected ? DesignSystem.Typography.navItemSelected : DesignSystem.Typography.navItem)
-                    .foregroundColor(isSelected ? .primaryText : .secondaryText)
-                
-                // Selection indicator
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.accentColor)
-                    .frame(height: 3)
-                    .opacity(isSelected ? 1 : 0)
-                    .scaleEffect(x: isSelected ? 1 : 0.5, y: 1)
-            }
-            .frame(minWidth: 90)
-            .padding(.vertical, DesignSystem.spacingXSmall)
-            .padding(.horizontal, DesignSystem.spacingSmall)
-            .background(
-                RoundedRectangle(cornerRadius: DesignSystem.cornerRadiusSmall)
-                    .fill(isHovered ? Color.hoverOverlay : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(DesignSystem.quickFade) {
-                isHovered = hovering
-            }
-        }
-    }
-}
 
 // MARK: - General Settings Tab
 
@@ -1404,57 +1123,46 @@ struct AdvancedSettingsView: View {
 }
 
 // MARK: - Settings Section Component
+//
+// Stock GroupBox with a labeled header. macOS 26 styles GroupBox as the
+// canonical "settings card" automatically — no custom Material backgrounds
+// or hover animations needed. The previous version layered .performantGlass
+// + .adaptiveShadow + .onHover hover-bounce, which all suppressed the
+// system's automatic Liquid Glass treatment in Settings.
 
 struct SettingsSection<Content: View>: View {
     let title: String
     let icon: String
     @ViewBuilder let content: () -> Content
-    @State private var isHovered = false
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
-            Label(title, systemImage: icon)
-                .font(DesignSystem.Typography.sectionTitle)
-                .foregroundColor(.primaryText)
-            
-            VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
                 content()
             }
-            .padding(DesignSystem.spacingLarge)
-            .performantGlass(
-                material: isHovered ? DesignSystem.glassPrimary : DesignSystem.glassSecondary,
-                cornerRadius: DesignSystem.cornerRadiusMedium,
-                strokeOpacity: isHovered ? 0.15 : 0.1
-            )
-            .adaptiveShadow(
-                isHovered: isHovered,
-                baseRadius: 8,
-                baseOpacity: 0.05
-            )
-        }
-        .onHover { hovering in
-            withAnimation(DesignSystem.quickFade) {
-                isHovered = hovering
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.headline)
         }
     }
 }
 
 // MARK: - Settings Row Component
+//
+// Uses LabeledContent — the stock SwiftUI "label : value" row. Renders with
+// system spacing, alignment, and Dynamic Type support automatically.
 
 struct SettingsRow<Content: View>: View {
     let label: String
     let systemImage: String
     @ViewBuilder let content: () -> Content
-    
+
     var body: some View {
-        HStack {
-            Label(label, systemImage: systemImage)
-                .font(DesignSystem.Typography.body)
-                .foregroundColor(.secondaryText)
-            Spacer()
+        LabeledContent {
             content()
-                .font(DesignSystem.Typography.body)
+        } label: {
+            Label(label, systemImage: systemImage)
         }
     }
 }
@@ -1553,104 +1261,7 @@ struct DocumentationView: View {
     }
 }
 
-// MARK: - Search Result Row
 
-struct SearchResultRow: View {
-    let result: SettingsView.SearchResult
-    let action: () -> Void
-    @State private var isHovered = false
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: DesignSystem.spacingMedium) {
-                Image(systemName: result.icon)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundColor(.accentColor)
-                    .frame(width: 36, height: 36)
-                    .performantGlass(
-                        material: DesignSystem.glassOverlay,
-                        cornerRadius: DesignSystem.cornerRadiusSmall
-                    )
-                
-                VStack(alignment: .leading, spacing: DesignSystem.spacingXSmall) {
-                    Text(result.title)
-                        .font(DesignSystem.Typography.subtitle)
-                        .foregroundColor(.primaryText)
-                    
-                    Text(result.description)
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(.secondaryText)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: DesignSystem.spacingXSmall) {
-                    Label(result.tab.rawValue, systemImage: result.tab.icon)
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(.tertiaryText)
-                    
-                    Image(systemName: "chevron.right")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(.tertiaryText)
-                }
-            }
-            .padding(DesignSystem.spacingMedium)
-            .frame(maxWidth: .infinity)
-            .performantGlass(
-                material: isHovered ? DesignSystem.glassPrimary : DesignSystem.glassSecondary,
-                cornerRadius: DesignSystem.cornerRadiusMedium,
-                strokeOpacity: isHovered ? 0.15 : 0.1
-            )
-            .adaptiveShadow(
-                isHovered: isHovered,
-                baseRadius: 6,
-                baseOpacity: 0.05
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(DesignSystem.quickFade) {
-                isHovered = hovering
-            }
-        }
-    }
-}
-
-// MARK: - Settings Quick Action Button
-
-struct SettingsQuickActionButton: View {
-    let icon: String
-    let isActive: Bool
-    let action: () -> Void
-    @State private var isHovered = false
-    
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundColor(isActive ? .accentColor : .secondaryText)
-                .frame(width: 36, height: 36)
-                .performantGlass(
-                    material: isHovered || isActive ? DesignSystem.glassPrimary : DesignSystem.glassOverlay,
-                    cornerRadius: DesignSystem.cornerRadiusSmall,
-                    strokeOpacity: isHovered || isActive ? 0.2 : 0.1
-                )
-                .adaptiveShadow(
-                    isHovered: isHovered,
-                    isSelected: isActive,
-                    baseRadius: 4,
-                    baseOpacity: 0.05
-                )
-                .scaleEffect(isHovered ? 1.05 : 1.0)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(DesignSystem.quickFade) {
-                isHovered = hovering
-            }
-        }
-    }
-}
 
 #Preview {
     SettingsView()
