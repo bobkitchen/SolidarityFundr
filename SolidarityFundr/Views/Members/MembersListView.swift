@@ -274,15 +274,14 @@ struct MemberRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                // Member Avatar
-                Circle()
-                    .fill(Color.accentColor.opacity(0.1))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(member.name?.prefix(2).uppercased() ?? "??")
-                            .font(.headline)
-                            .foregroundStyle(Color.accentColor)
-                    )
+                // Member Avatar — system SF Symbol with hierarchical tinting,
+                // matching Contacts / Mail / Reminders styling.
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .frame(width: 36, height: 36)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
                 
                 // Member Info
                 VStack(alignment: .leading, spacing: 4) {

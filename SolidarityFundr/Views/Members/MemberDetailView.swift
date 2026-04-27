@@ -139,16 +139,13 @@ struct MemberDetailView: View {
     
     private var memberHeaderCard: some View {
         VStack(spacing: 16) {
-            // Member Avatar
-            Circle()
-                .fill(Color.accentColor.opacity(0.1))
-                .frame(width: 80, height: 80)
-                .overlay(
-                    Text(member.name?.prefix(2).uppercased() ?? "??")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.accentColor)
-                )
+            // Member Avatar — system SF Symbol, hierarchical tint
+            Image(systemName: "person.crop.circle.fill")
+                .resizable()
+                .frame(width: 64, height: 64)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
             
             // Member Info
             VStack(spacing: 8) {
@@ -374,128 +371,69 @@ struct QuickActionButton: View {
 
 struct ContactInfoCard: View {
     let member: Member
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Contact Information")
-                .font(.headline)
-            
+        GroupBox("Contact Information") {
             if let email = member.email {
-                Label(email, systemImage: "envelope.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                LabeledContent("Email") {
+                    Text(email).foregroundStyle(.secondary)
+                }
             }
-            
             if let phone = member.phoneNumber {
-                HStack {
-                    Label(phone, systemImage: "phone.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                    
-                    if PhoneNumberValidator.validate(phone) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.caption)
+                LabeledContent("Phone") {
+                    HStack(spacing: 8) {
+                        Text(phone).foregroundStyle(.secondary)
+                        if PhoneNumberValidator.validate(phone) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                        }
                     }
                 }
             }
-            
+
             Divider()
-            
-            HStack {
-                Label("SMS Notifications", systemImage: "message.fill")
-                    .font(.subheadline)
-                
-                Spacer()
-                
-                if member.smsOptIn && member.phoneNumber != nil && PhoneNumberValidator.validate(member.phoneNumber!) {
-                    Text("Enabled")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Color.green.opacity(0.2))
-                        .foregroundStyle(.green)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                } else {
-                    Text("Disabled")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Color.gray.opacity(0.2))
-                        .foregroundStyle(.gray)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
+
+            LabeledContent("SMS Notifications") {
+                let enabled = member.smsOptIn && member.phoneNumber != nil
+                    && PhoneNumberValidator.validate(member.phoneNumber!)
+                Text(enabled ? "Enabled" : "Disabled")
+                    .foregroundStyle(enabled ? .green : .secondary)
             }
-            
+
             if let lastSent = member.lastStatementSentDate {
-                HStack {
-                    Text("Last Statement Sent")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                LabeledContent("Last Statement Sent") {
                     Text(DateHelper.formatDate(lastSent))
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
 struct FinancialSummaryCard: View {
     let member: Member
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Financial Summary")
-                .font(.headline)
-            
-            HStack {
-                Text("Total Contributions")
-                    .foregroundStyle(.secondary)
-                Spacer()
+        GroupBox("Financial Summary") {
+            LabeledContent("Total Contributions") {
                 Text(CurrencyFormatter.shared.format(member.totalContributions))
-                    .fontWeight(.medium)
             }
-            
-            HStack {
-                Text("Active Loans")
-                    .foregroundStyle(.secondary)
-                Spacer()
+            LabeledContent("Active Loans") {
                 Text(CurrencyFormatter.shared.format(member.totalActiveLoanBalance))
-                    .fontWeight(.medium)
                     .foregroundStyle(member.hasActiveLoans ? .orange : .primary)
             }
-            
-            HStack {
-                Text("Available Balance")
-                    .foregroundStyle(.secondary)
-                Spacer()
+            LabeledContent("Available Balance") {
                 Text(CurrencyFormatter.shared.format(member.availableContributions))
-                    .fontWeight(.medium)
                     .foregroundStyle(.green)
             }
-            
             if member.cashOutAmount > 0 {
                 Divider()
-                HStack {
-                    Text("Cash Out Amount")
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                LabeledContent("Cash Out Amount") {
                     Text(CurrencyFormatter.shared.format(member.cashOutAmount))
-                        .fontWeight(.medium)
                 }
             }
         }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

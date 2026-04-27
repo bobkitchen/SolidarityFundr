@@ -363,100 +363,71 @@ struct LoanStatusBadge: View {
 
 struct LoanInfoCard: View {
     let loan: Loan
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Loan Information")
-                .font(.headline)
-            
+        GroupBox("Loan Information") {
             InfoRow(label: "Loan Amount", value: CurrencyFormatter.shared.format(loan.amount))
             InfoRow(label: "Monthly Payment", value: CurrencyFormatter.shared.format(loan.monthlyPayment))
             InfoRow(label: "Repayment Period", value: "\(loan.repaymentMonths) months")
             InfoRow(label: "Issue Date", value: DateHelper.formatDate(loan.issueDate))
-            
+
             if let dueDate = loan.dueDate {
                 InfoRow(label: "Due Date", value: DateHelper.formatDate(dueDate))
-                
+
                 if loan.loanStatus == .active {
                     if loan.isOverdue {
-                        let daysOverdue = DateHelper.daysOverdue(dueDate)
                         InfoRow(
                             label: "Days Overdue",
-                            value: "\(daysOverdue) days",
+                            value: "\(DateHelper.daysOverdue(dueDate)) days",
                             valueColor: .red
                         )
                     } else {
-                        let daysUntilDue = DateHelper.daysUntilDue(dueDate)
                         InfoRow(
                             label: "Days Until Due",
-                            value: "\(daysUntilDue) days",
+                            value: "\(DateHelper.daysUntilDue(dueDate)) days",
                             valueColor: .green
                         )
                     }
                 }
             }
         }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
 struct PaymentSummaryCard: View {
     let summary: LoanSummary
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Payment Summary")
-                .font(.headline)
-            
+        GroupBox("Payment Summary") {
             InfoRow(label: "Total Paid", value: CurrencyFormatter.shared.format(summary.totalPaid))
             InfoRow(label: "Remaining Balance", value: CurrencyFormatter.shared.format(summary.remainingBalance))
             InfoRow(label: "Payments Made", value: "\(summary.paymentHistory.count)")
             InfoRow(label: "Remaining Payments", value: "\(summary.remainingPayments)")
-            
+
             if let nextDue = summary.nextPaymentDue {
                 Divider()
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Next Payment Due")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                LabeledContent("Next Payment Due") {
+                    HStack(spacing: 8) {
+                        DateHelper.paymentStatus(for: nextDue).color
+                            .frame(width: 8, height: 8)
+                            .clipShape(Circle())
                         Text(DateHelper.formatDate(nextDue))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
                     }
-                    
-                    Spacer()
-                    
-                    DateHelper.paymentStatus(for: nextDue).color
-                        .frame(width: 8, height: 8)
-                        .clipShape(Circle())
                 }
             }
         }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
 struct NotesCard: View {
     let notes: String
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Notes")
-                .font(.headline)
-            
+        GroupBox("Notes") {
             Text(notes)
-                .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -542,15 +513,10 @@ struct InfoRow: View {
     let label: String
     let value: String
     var valueColor: Color = .primary
-    
+
     var body: some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .fontWeight(.medium)
-                .foregroundStyle(valueColor)
+        LabeledContent(label) {
+            Text(value).foregroundStyle(valueColor)
         }
         .font(.subheadline)
     }

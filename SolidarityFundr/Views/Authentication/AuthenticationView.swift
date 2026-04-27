@@ -136,101 +136,126 @@ struct AuthenticationView: View {
     }
 
     // MARK: - PIN Entry View
-    
+    //
+    // macOS users have a keyboard — the number-pad pattern is an iOS idiom.
+    // On Mac we use a single SecureField that auto-validates as the user
+    // types. iOS keeps the number pad.
+
     private var pinEntryView: some View {
-        VStack(spacing: 30) {
+        VStack(spacing: 24) {
             Image(systemName: "lock.circle.fill")
                 .font(.system(size: 60))
                 .foregroundStyle(Color.accentColor)
                 .symbolEffect(.bounce, value: pinAttempts)
-            
-            VStack(spacing: 10) {
+
+            VStack(spacing: 8) {
                 Text("Enter PIN")
                     .font(.headline)
-                
                 Text("Enter your security PIN to access the fund")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            
-            // PIN Input
-            HStack(spacing: 15) {
-                ForEach(0..<6) { index in
+
+            #if os(macOS)
+            macPINField
+            #else
+            iOSPINPad
+            #endif
+
+            if !pinError.isEmpty {
+                Text(pinError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+
+            if authManager.biometricType != .none {
+                Button("Use \(authManager.biometricType.displayName) Instead") {
+                    showingPINEntry = false
+                    enteredPIN = ""
+                    pinError = ""
+                    authenticateWithBiometrics()
+                }
+                .buttonStyle(.link)
+            }
+        }
+        .frame(maxWidth: 320)
+    }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var macPINField: some View {
+        VStack(spacing: 12) {
+            SecureField("PIN", text: $enteredPIN)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+                .multilineTextAlignment(.center)
+                .font(.title2.monospacedDigit())
+                .frame(maxWidth: 200)
+                .onSubmit { validatePIN() }
+                .onChange(of: enteredPIN) { _, value in
+                    // Limit to 6 digits, strip non-digits
+                    let digitsOnly = value.filter(\.isNumber).prefix(6)
+                    if String(digitsOnly) != value {
+                        enteredPIN = String(digitsOnly)
+                    }
+                    pinError = ""
+                }
+
+            Button("Unlock") { validatePIN() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+                .disabled(enteredPIN.count < 4)
+        }
+    }
+    #else
+    @ViewBuilder
+    private var iOSPINPad: some View {
+        VStack(spacing: 24) {
+            // Six-dot indicator
+            HStack(spacing: 16) {
+                ForEach(0..<6, id: \.self) { index in
                     Circle()
-                        .fill(index < enteredPIN.count ? Color.accentColor : Color.gray.opacity(0.3))
-                        .frame(width: 15, height: 15)
+                        .fill(index < enteredPIN.count ? Color.accentColor : .secondary.opacity(0.3))
+                        .frame(width: 14, height: 14)
                 }
             }
-            .padding()
-            
-            // Number Pad
-            VStack(spacing: 20) {
-                ForEach(0..<3) { row in
-                    HStack(spacing: 30) {
-                        ForEach(1..<4) { col in
-                            let number = row * 3 + col
-                            numberButton(String(number))
+
+            VStack(spacing: 16) {
+                ForEach(0..<3, id: \.self) { row in
+                    HStack(spacing: 24) {
+                        ForEach(1..<4, id: \.self) { col in
+                            numberButton(String(row * 3 + col))
                         }
                     }
                 }
-                
-                HStack(spacing: 30) {
-                    Button(action: {
-                        showingPINEntry = false
-                        enteredPIN = ""
-                        pinError = ""
-                    }) {
-                        Image(systemName: authManager.biometricType.iconName)
-                            .font(.title2)
-                            .frame(width: 60, height: 60)
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    
+                HStack(spacing: 24) {
+                    Color.clear.frame(width: 60, height: 60)
                     numberButton("0")
-                    
-                    Button(action: {
+                    Button {
                         if !enteredPIN.isEmpty {
                             enteredPIN.removeLast()
                             pinError = ""
                         }
-                    }) {
+                    } label: {
                         Image(systemName: "delete.left.fill")
                             .font(.title2)
                             .frame(width: 60, height: 60)
-                            .foregroundStyle(.red)
                     }
+                    .buttonStyle(.plain)
                 }
-            }
-            
-            if !pinError.isEmpty {
-                Text(pinError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
             }
         }
     }
-    
-    // MARK: - Helper Methods
-    
-    @ViewBuilder
+
     private func numberButton(_ number: String) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
-            Button(action: { tapNumber(number) }) {
-                Text(number)
-                    .font(.title)
-                    .frame(width: 60, height: 60)
-            }
-            .buttonStyle(.glass)
-            .clipShape(Circle())
-        } else {
-            Button(action: { tapNumber(number) }) {
-                Text(number)
-                    .font(.title)
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 30))
-            }
+        Button { tapNumber(number) } label: {
+            Text(number)
+                .font(.title)
+                .frame(width: 60, height: 60)
+                .background(.thinMaterial, in: Circle())
         }
+        .buttonStyle(.plain)
     }
 
     private func tapNumber(_ number: String) {
@@ -240,6 +265,7 @@ struct AuthenticationView: View {
             validatePIN()
         }
     }
+    #endif
     
     private func authenticateWithBiometrics() {
         isAuthenticating = true
