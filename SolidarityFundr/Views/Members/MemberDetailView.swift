@@ -139,12 +139,12 @@ struct MemberDetailView: View {
     
     private var memberHeaderCard: some View {
         VStack(spacing: 16) {
-            // Member Avatar — system SF Symbol, hierarchical tint
+            // Member Avatar — deterministic per-member tint
             Image(systemName: "person.crop.circle.fill")
                 .resizable()
                 .frame(width: 64, height: 64)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.tint)
+                .foregroundStyle(BrandColor.avatarTint(for: member.name))
                 .accessibilityHidden(true)
             
             // Member Info

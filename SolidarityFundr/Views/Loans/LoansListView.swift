@@ -235,22 +235,35 @@ struct LoanRowView: View {
                     
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(CurrencyFormatter.shared.format(loan.amount))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
                         Text("Issued \(DateHelper.formatDate(loan.issueDate))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-                
-                // Progress Bar
+
+                // Progress Bar — green→honey→rust gradient communicates payoff
+                // health at a glance. Overdue loans render solid rust.
                 VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: loan.completionPercentage, total: 100)
-                        .tint(loan.isOverdue ? .red : Color.accentColor)
-                    
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.quaternary)
+                                .frame(height: 6)
+                            Capsule()
+                                .fill(loan.isOverdue
+                                      ? AnyShapeStyle(BrandColor.rust)
+                                      : AnyShapeStyle(LinearGradient.loanProgress(percentage: loan.completionPercentage)))
+                                .frame(width: max(0, geo.size.width * loan.completionPercentage / 100), height: 6)
+                        }
+                    }
+                    .frame(height: 6)
+
                     HStack {
                         Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
                             .font(.caption)
+                            .monospacedDigit()
                         
                         Spacer()
                         

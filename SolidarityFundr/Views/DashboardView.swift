@@ -65,8 +65,33 @@ struct DashboardView: View {
     @ViewBuilder
     private var sidebar: some View {
         List(selection: $selection) {
+            // Brand lockup at the top of the sidebar. The Avocado mark + a
+            // serif wordmark gives the app an identity beyond "Solidarity
+            // Fund" plain-text title.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Image("AvocadoLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Solidarity Fund")
+                            .font(.system(.headline, design: .serif))
+                            .foregroundStyle(.primary)
+                        Text("Parachichi House")
+                            .font(.caption2)
+                            .textCase(.uppercase)
+                            .tracking(0.8)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .listRowBackground(Color.clear)
+
             ForEach(Array(DashboardSection.allCases.enumerated()), id: \.element) { index, section in
                 Label(section.title, systemImage: section.systemImage)
+                    .foregroundStyle(section.tint)
                     .tag(Optional(section))
                     // ⌘1–5 to switch tabs.
                     .keyboardShortcutForSidebarIndex(index, action: { selection = section })
@@ -77,7 +102,9 @@ struct DashboardView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Solidarity Fund")
+        // The brand lockup replaces the plain "Solidarity Fund" navigation
+        // title — hide the default title to avoid duplication.
+        .navigationTitle("")
     }
 
     // MARK: - Detail
@@ -89,13 +116,19 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func detailContent(for section: DashboardSection) -> some View {
-        switch section {
-        case .overview: OverviewView()
-        case .members: MembersListView()
-        case .loans: LoansListView()
-        case .payments: PaymentsView()
-        case .reports: ReportsView()
+        // Per-section tinting: each page inherits its section's brand color
+        // so selection highlights, links, ProgressViews, and prominent buttons
+        // pick it up automatically. Members reads olive, Loans honey, etc.
+        Group {
+            switch section {
+            case .overview: OverviewView()
+            case .members: MembersListView()
+            case .loans: LoansListView()
+            case .payments: PaymentsView()
+            case .reports: ReportsView()
+            }
         }
+        .tint(section.tint)
     }
 }
 
@@ -178,7 +211,8 @@ struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
+                welcomeHeader
                 heroFundBalance
                 secondaryMetrics
                 recentTransactions
@@ -207,6 +241,23 @@ struct OverviewView: View {
         }
     }
 
+    // Editorial welcome — Swahili greeting in serif, today's date in muted
+    // small caps. Personal touch that says "this is YOUR fund," not "this is
+    // a SaaS dashboard."
+    @ViewBuilder
+    private var welcomeHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Habari")
+                .font(.system(.largeTitle, design: .serif))
+                .foregroundStyle(.primary)
+            Text(Date.now.formatted(.dateTime.weekday(.wide).month().day()).uppercased())
+                .font(.caption2)
+                .tracking(1.4)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // Hero card: fund balance reads as the most important figure on the page,
     // matching the pattern Wallet / Numbers / banking apps use for an account.
     @ViewBuilder
@@ -218,10 +269,7 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
 
-                Text(CurrencyFormatter.shared.format(fundBalance))
-                    .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
+                CurrencyPill(amount: fundBalance, tint: BrandColor.avocado, size: 44)
                     .accessibilityLabel("Fund balance, \(CurrencyFormatter.shared.format(fundBalance))")
 
                 HStack(spacing: 24) {

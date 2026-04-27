@@ -122,12 +122,10 @@ struct LoanDetailView: View {
                 LoanStatusBadge(loan: loan)
             }
             
-            // Loan Amount
+            // Loan Amount — KSH pill + serif numerics for editorial gravitas
             VStack(spacing: 8) {
-                Text(CurrencyFormatter.shared.format(loan.amount))
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                
+                CurrencyPill(amount: loan.amount, tint: BrandColor.honey, size: 36)
+
                 HStack {
                     Text("Issued on \(DateHelper.formatDate(loan.issueDate))")
                     if let dueDate = loan.dueDate {
@@ -138,13 +136,23 @@ struct LoanDetailView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            
-            // Progress
+
+            // Progress — gradient capsule (green → honey → rust)
             if loan.loanStatus == .active {
                 VStack(spacing: 8) {
-                    ProgressView(value: loan.completionPercentage, total: 100)
-                        .tint(loan.isOverdue ? .red : Color.accentColor)
-                        .scaleEffect(x: 1, y: 2)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.quaternary)
+                                .frame(height: 8)
+                            Capsule()
+                                .fill(loan.isOverdue
+                                      ? AnyShapeStyle(BrandColor.rust)
+                                      : AnyShapeStyle(LinearGradient.loanProgress(percentage: loan.completionPercentage)))
+                                .frame(width: max(0, geo.size.width * loan.completionPercentage / 100), height: 8)
+                        }
+                    }
+                    .frame(height: 8)
                     
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {

@@ -274,13 +274,14 @@ struct MemberRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                // Member Avatar — system SF Symbol with hierarchical tinting,
-                // matching Contacts / Mail / Reminders styling.
+                // Member Avatar — SF Symbol tinted deterministically from the
+                // member's name. Each member gets a stable color across sessions
+                // without requiring uploaded photos.
                 Image(systemName: "person.crop.circle.fill")
                     .resizable()
                     .frame(width: 36, height: 36)
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(BrandColor.avatarTint(for: member.name))
                     .accessibilityHidden(true)
                 
                 // Member Info
@@ -314,9 +315,9 @@ struct MemberRowView: View {
                 // Contribution Info
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(CurrencyFormatter.shared.format(member.totalContributions))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+
                     Text("Contributions")
                         .font(.caption)
                         .foregroundStyle(.secondary)
