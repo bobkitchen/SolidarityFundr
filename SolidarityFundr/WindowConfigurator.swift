@@ -9,15 +9,24 @@
 #if os(macOS)
 import AppKit
 
-/// Approach: keep the title bar (so traffic lights have an anchor frame), make
-/// it transparent, hide the title text, enable full-size content view so SwiftUI
-/// content extends beneath the title bar, and attach an empty NSToolbar so the
-/// chrome height settles correctly. Using `.hiddenTitleBar` removes the chrome
-/// that anchors traffic lights — that was the previously documented bug.
+/// Sets the title bar transparent, hides the title text, and enables
+/// `.fullSizeContentView` so SwiftUI content extends beneath the title bar.
+///
+/// IMPORTANT: We do NOT install our own `NSToolbar`. SwiftUI manages the window
+/// toolbar to host `.toolbar { ToolbarItem }` items declared in views. Replacing
+/// the toolbar here would clobber those items and trigger NSException crashes
+/// when SwiftUI tries to update them.
+///
+/// We also only configure each window ONCE (tracked by associated object) —
+/// `windowDidBecomeKey` fires every time a window regains focus, and
+/// re-applying `.fullSizeContentView` etc. mid-session can interfere with
+/// SwiftUI's window machinery.
 final class WindowConfigurator: NSObject, NSApplicationDelegate {
+    private static var configuredKey: UInt8 = 0
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
-            self?.configureMainWindows()
+            self?.configureExistingWindows()
         }
 
         NotificationCenter.default.addObserver(
@@ -30,32 +39,34 @@ final class WindowConfigurator: NSObject, NSApplicationDelegate {
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        configure(window)
+        configureOnce(window)
     }
 
-    private func configureMainWindows() {
+    private func configureExistingWindows() {
         for window in NSApp.windows {
-            configure(window)
+            configureOnce(window)
         }
     }
 
-    private func configure(_ window: NSWindow) {
+    private func configureOnce(_ window: NSWindow) {
+        // Skip windows we've already touched. `windowDidBecomeKey` fires on
+        // every focus change; one configure pass is enough.
+        if objc_getAssociatedObject(window, &Self.configuredKey) != nil { return }
+
         // Skip windows that don't have a title bar (panels, popovers).
         guard window.styleMask.contains(.titled) else { return }
 
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
-
-        // Attach a minimal toolbar — gives the title bar a stable height and
-        // lets traffic lights settle into their canonical position.
-        if window.toolbar == nil {
-            let toolbar = NSToolbar(identifier: "MainToolbar")
-            window.toolbar = toolbar
-            window.toolbarStyle = .unified
-        }
-
         window.isMovableByWindowBackground = true
+
+        objc_setAssociatedObject(
+            window,
+            &Self.configuredKey,
+            true,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        )
     }
 }
 #endif
