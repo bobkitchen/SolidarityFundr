@@ -113,8 +113,6 @@ struct LoansListView: View {
                     Text(viewModel.formatCurrency(viewModel.fundBalance))
                         .font(.title2)
                         .fontWeight(.semibold)
-                        .contentTransition(.numericText())
-                        .animation(.snappy, value: viewModel.fundBalance)
                 }
                 
                 Spacer()

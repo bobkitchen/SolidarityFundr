@@ -1825,9 +1825,7 @@ struct ReportTypeButton: View {
     let reportType: ReportsView.ReportType
     let isSelected: Bool
     let action: () -> Void
-    
-    @State private var isHovered = false
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
@@ -1835,9 +1833,7 @@ struct ReportTypeButton: View {
                     .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(iconColor)
-                    .scaleEffect(isHovered ? 1.1 : 1.0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
-                
+
                 Text(reportType.rawValue)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
                     .foregroundColor(textColor)
@@ -1856,33 +1852,20 @@ struct ReportTypeButton: View {
             )
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
     }
-    
+
     private var iconColor: Color {
         if isSelected {
             return .accentColor
-        } else if isHovered {
-            return .primary
         } else {
             return .secondary
         }
     }
-    
+
     private var textColor: Color {
-        if isSelected {
-            return .primary
-        } else if isHovered {
-            return .primary.opacity(0.9)
-        } else {
-            return .secondary
-        }
+        isSelected ? .primary : .secondary
     }
-    
+
     @ViewBuilder
     private var backgroundView: some View {
         if isSelected {
@@ -1891,13 +1874,6 @@ struct ReportTypeButton: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color.accentColor.opacity(0.08))
-                )
-        } else if isHovered {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.primary.opacity(0.03))
                 )
         } else {
             RoundedRectangle(cornerRadius: 10)

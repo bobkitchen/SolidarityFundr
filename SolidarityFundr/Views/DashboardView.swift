@@ -65,19 +65,16 @@ struct DashboardView: View {
     @ViewBuilder
     private var sidebar: some View {
         List(selection: $selection) {
-            Section {
-                ForEach(DashboardSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .tag(Optional(section))
-                }
+            ForEach(DashboardSection.allCases) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(Optional(section))
             }
 
-            Section {
+            Section("Fund Status") {
                 FundStatusSummary()
-            } header: {
-                Text("Fund Status")
             }
         }
+        .listStyle(.sidebar)
         .navigationTitle("Solidarity Fund")
     }
 
@@ -113,21 +110,20 @@ private struct FundStatusSummary: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // Render each metric as its own List row so the sidebar list styling
+        // applies (proper row height, separator inheritance, hover) instead
+        // of squashing everything into one row.
+        Group {
             row("Balance", value: CurrencyFormatter.shared.format(fundBalance), color: .green)
             row("Utilization", value: String(format: "%.1f%%", utilization * 100),
                 color: utilizationColor(utilization))
             row("Active Loans", value: "\(dataManager.activeLoans.count)", color: .orange)
         }
-        .font(.caption)
-        .padding(.vertical, 4)
     }
 
     private func row(_ label: String, value: String, color: Color) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).foregroundStyle(color).fontWeight(.medium)
+        LabeledContent(label) {
+            Text(value).foregroundStyle(color)
         }
     }
 
@@ -269,8 +265,6 @@ struct StatCard: View {
                 Text(value)
                     .font(.title2)
                     .fontWeight(.semibold)
-                    .contentTransition(.numericText())
-                    .animation(.snappy, value: value)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
