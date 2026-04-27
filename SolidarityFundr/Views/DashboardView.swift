@@ -101,15 +101,36 @@ struct DashboardView: View {
                     // ⌘1–5 to switch tabs.
                     .keyboardShortcutForSidebarIndex(index, action: { selection = section })
             }
-
-            Section("Fund Status") {
-                FundStatusSummary()
-            }
         }
         .listStyle(.sidebar)
         // The brand lockup replaces the plain "Solidarity Fund" navigation
         // title — hide the default title to avoid duplication.
         .navigationTitle("")
+        // Pin Fund Status to the bottom of the sidebar column. `safeAreaInset`
+        // is the canonical SwiftUI hook for "footer that sits below scrolling
+        // content but above safe-area chrome."
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            sidebarFundStatusFooter
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarFundStatusFooter: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+
+            Text("Fund Status")
+                .font(.caption2)
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+
+            FundStatusSummary()
+                .labeledContentStyle(.automatic)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
 
     // MARK: - Detail
