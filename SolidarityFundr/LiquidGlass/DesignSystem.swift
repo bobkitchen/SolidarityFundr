@@ -110,150 +110,84 @@ struct DesignSystem {
     static let zIndexTooltip: Double = 1000
 }
 
-// MARK: - macOS 26 Glass Effect View Extensions
+// MARK: - Compat Helpers (passthrough)
 //
-// On macOS 26+ / iOS 26+ these route to the native `glassEffect()` so the
-// user actually sees Liquid Glass (refraction, shimmer, morphing). On older
-// OS versions they fall back to the prior `Material`-based rendering. Without
-// the `#available` gate the compat modifiers were silently rendering Material
-// even on Tahoe — which is why the UI looked unchanged.
+// The previous file contained ~10 custom glass-effect modifiers + a custom
+// ButtonStyle that approximated Liquid Glass with `.regularMaterial` and
+// hand-rolled hover/scale. On macOS 26 those simulators *suppressed* the
+// system's automatic Liquid Glass rendering, which is why the UI looked
+// "cobbled together" even on Tahoe.
+//
+// Each helper below is now a no-op or passthrough so existing call sites
+// keep compiling, but the system applies its own Liquid Glass styling to
+// stock NavigationSplitView, List, GroupBox, .toolbar, .searchable etc.
 
 extension View {
-    /// Apply glass effect with capsule shape
-    /// Use this for buttons and pill-shaped controls
+    /// Pill-shaped surface (e.g. a tag/badge). Uses Material on all OS.
+    /// Liquid Glass on Tahoe is reserved for navigation chrome, not content.
     @ViewBuilder
     func tahoeGlass() -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
-            self.glassEffect(.regular, in: Capsule())
-        } else {
-            self.background(.ultraThinMaterial)
-                .clipShape(Capsule())
-        }
+        self.background(.ultraThinMaterial, in: Capsule())
+            .clipShape(Capsule())
     }
 
-    /// Apply glass effect with rounded rectangle
-    /// Use this for cards and panels
+    /// Card surface. Uses Material; on macOS 26 inside a stock container
+    /// (NavigationSplitView etc.) the system applies Liquid Glass naturally.
     @ViewBuilder
     func tahoeGlassCard(cornerRadius: CGFloat = DesignSystem.cornerRadiusLarge) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
-            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        } else {
-            self.background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.regularMaterial)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        }
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        self.background(.regularMaterial, in: shape)
+            .clipShape(shape)
     }
 
-    /// Apply prominent glass effect for primary actions
+    /// Prominent card surface (accent-tinted Material).
     @ViewBuilder
     func tahoeGlassProminent(cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
-            // There is no `.prominent` Glass variant. Use accent-tinted regular
-            // glass so prominent surfaces read as filled while still being glass.
-            self.glassEffect(.regular.tint(Color.accentColor.opacity(0.6)),
-                             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        } else {
-            self.background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.thickMaterial)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        }
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        self.background(Color.accentColor.opacity(0.15), in: shape)
+            .background(.thickMaterial, in: shape)
+            .clipShape(shape)
     }
 
-    /// Apply nested/concentric corners for proper visual hierarchy
     @ViewBuilder
     func concentricCorners(radius: CGFloat = DesignSystem.cornerRadiusMedium) -> some View {
         self.clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 
-    /// Apply glass styling for sidebars
+    /// No-op — the parent NavigationSplitView styles its sidebar.
     @ViewBuilder
     func sidebarGlassBackground() -> some View {
-        self // No additional styling - liquidGlassSidebar handles it
+        self
     }
 }
 
-// MARK: - macOS 26 Glass Button Style
+// MARK: - Backwards-compatible Button Style (stock-based)
+//
+// The previous TahoeGlassButtonStyle hand-rolled glass with Material +
+// hover scale. We now delegate to stock SwiftUI button styles which on
+// macOS 26 are themselves Liquid Glass-aware via the system.
 
-/// Glass button style. On macOS 26+/iOS 26+ uses the native `.buttonStyle(.glass)` /
-/// `.buttonStyle(.glassProminent)` (which provide proper refraction, scale, shimmer)
-/// via a wrapper. On older OS falls back to the Material-based rendering.
 struct TahoeGlassButtonStyle: ButtonStyle {
     var isProminent: Bool = false
     var cornerRadius: CGFloat = DesignSystem.cornerRadiusSmall
 
     func makeBody(configuration: Configuration) -> some View {
-        GlassButtonView(configuration: configuration, isProminent: isProminent, cornerRadius: cornerRadius)
-    }
-
-    struct GlassButtonView: View {
-        let configuration: ButtonStyleConfiguration
-        let isProminent: Bool
-        let cornerRadius: CGFloat
-        @State private var isHovered = false
-
-        var body: some View {
-            if #available(macOS 26.0, iOS 26.0, *) {
-                // Use the native interactive Glass effect — it provides press
-                // scale, shimmer, and touch-point illumination automatically.
-                let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                configuration.label
-                    .padding(.horizontal, DesignSystem.spacingMedium)
-                    .padding(.vertical, DesignSystem.spacingSmall)
-                    .glassEffect(
-                        isProminent
-                            ? .regular.tint(Color.accentColor.opacity(0.6)).interactive()
-                            : .regular.interactive(),
-                        in: shape
-                    )
-                    .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-                    .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
-            } else {
-                configuration.label
-                    .padding(.horizontal, DesignSystem.spacingMedium)
-                    .padding(.vertical, DesignSystem.spacingSmall)
-                    .background(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(isProminent ? .thickMaterial : .ultraThinMaterial)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(Color.white.opacity(isHovered ? 0.2 : 0.1), lineWidth: 0.5)
-                    )
-                    .scaleEffect(configuration.isPressed ? 0.97 : (isHovered ? 1.02 : 1.0))
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovered)
-                    .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
-                    .onHover { hovering in
-                        isHovered = hovering
-                    }
-            }
-        }
+        configuration.label
+            .padding(.horizontal, DesignSystem.spacingMedium)
+            .padding(.vertical, DesignSystem.spacingSmall)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isProminent ? Color.accentColor : Color.secondary.opacity(0.15))
+            )
+            .foregroundStyle(isProminent ? Color.white : Color.primary)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 
-// MARK: - macOS 26 Glass Effect Container
-
-/// Container for grouping multiple glass elements (required in macOS 26)
-/// Glass cannot correctly sample other glass, so elements must share a container
-@available(macOS 26.0, iOS 26.0, *)
-struct TahoeGlassContainer<Content: View>: View {
-    let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    var body: some View {
-        GlassEffectContainer {
-            content
-        }
-    }
-}
-
-/// Fallback container for older OS versions
+/// Container compat. Stock passthrough — wrapping pages in a glass container
+/// is unnecessary; NavigationSplitView/List/GroupBox handle grouping.
 struct GlassContainerCompat<Content: View>: View {
     let content: Content
 
@@ -262,13 +196,7 @@ struct GlassContainerCompat<Content: View>: View {
     }
 
     var body: some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
-            GlassEffectContainer {
-                content
-            }
-        } else {
-            content
-        }
+        content
     }
 }
 

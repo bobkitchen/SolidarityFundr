@@ -18,7 +18,7 @@ struct LoansListView: View {
 
     var body: some View {
         NavigationStack {
-            GlassContainerCompat {
+            Group {
                 VStack(spacing: 0) {
                     fundStatusHeader
                     filterBar

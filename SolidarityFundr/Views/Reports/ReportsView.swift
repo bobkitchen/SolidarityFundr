@@ -48,7 +48,7 @@ struct ReportsView: View {
     
     var body: some View {
         NavigationStack {
-            GlassContainerCompat {
+            Group {
                 VStack(spacing: 0) {
                     reportHeader
                     reportTypeSelector

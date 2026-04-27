@@ -20,7 +20,7 @@ struct PaymentsView: View {
 
     var body: some View {
         NavigationStack {
-            GlassContainerCompat {
+            Group {
                 VStack(spacing: 0) {
                     paymentSummaryHeader
                     dateRangeFilter
