@@ -119,6 +119,8 @@ struct CloudKitDetailsView: View {
     @State private var cloudKitStatus = "Checking..."
     @State private var accountStatus: CKAccountStatus = .couldNotDetermine
     @State private var copiedDiagnostic = false
+    @State private var probeResult: CloudKitSyncManager.ProbeResult?
+    @State private var probing = false
 
     var body: some View {
         NavigationStack {
@@ -161,6 +163,54 @@ struct CloudKitDetailsView: View {
                                 Text("Last sync: \(DateFormatter.fullDateTime.string(from: lastSync))")
                             }
                         }
+                    }
+                }
+
+                // Active Probe — answers "is data actually reaching iCloud?"
+                // independently of whether sync events have fired.
+                GroupBox("Live Probe") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let result = probeResult {
+                            probeRow(label: "Account",
+                                     value: accountStatusName(result.accountStatus),
+                                     ok: result.accountStatus == .available)
+                            if let userID = result.userRecordID {
+                                probeRow(label: "User Record",
+                                         value: String(userID.prefix(12)) + "…",
+                                         ok: true)
+                            }
+                            if let zoneCount = result.zoneCount {
+                                probeRow(label: "Private Zones",
+                                         value: "\(zoneCount)",
+                                         ok: zoneCount > 0)
+                            }
+                            if let probeError = result.error {
+                                Text(probeError)
+                                    .foregroundStyle(.red)
+                                    .font(.caption)
+                                    .textSelection(.enabled)
+                            }
+                        } else {
+                            Text("Press Run Probe to test the iCloud connection directly.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            runProbe()
+                        } label: {
+                            if probing {
+                                HStack(spacing: 6) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Probing…")
+                                }
+                            } else {
+                                Text("Run Probe")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.bordered)
+                        .disabled(probing)
                     }
                 }
 
@@ -216,7 +266,7 @@ struct CloudKitDetailsView: View {
                 Spacer()
             }
             .padding()
-            .frame(width: 340, height: 520)
+            .frame(width: 360, height: 680)
             .navigationTitle("CloudKit Sync")
             #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -232,6 +282,43 @@ struct CloudKitDetailsView: View {
         .task {
             cloudKitStatus = await syncManager.getCloudKitStatusMessage()
             accountStatus = await syncManager.checkCloudKitStatus()
+        }
+    }
+
+    private func runProbe() {
+        probing = true
+        Task {
+            let result = await syncManager.probeCloudKit()
+            await MainActor.run {
+                probeResult = result
+                accountStatus = result.accountStatus
+                probing = false
+            }
+        }
+    }
+
+    private func probeRow(label: String, value: String, ok: Bool) -> some View {
+        HStack {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(ok ? .green : .orange)
+            Text(label)
+                .font(.caption)
+            Spacer()
+            Text(value)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func accountStatusName(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .available: return "available"
+        case .noAccount: return "no account"
+        case .restricted: return "restricted"
+        case .couldNotDetermine: return "unknown"
+        case .temporarilyUnavailable: return "temporarily unavailable"
+        @unknown default: return "unknown"
         }
     }
 

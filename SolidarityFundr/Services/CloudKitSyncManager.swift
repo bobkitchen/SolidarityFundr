@@ -26,10 +26,17 @@ class CloudKitSyncManager: ObservableObject {
 
     let containerIdentifier = "iCloud.com.bobk.SolidarityFundr"
 
-    private let container: NSPersistentCloudKitContainer
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "NetworkMonitor")
     private var cancellables = Set<AnyCancellable>()
+
+    /// Lazily resolved so the manager can subscribe to container events
+    /// before `PersistenceController.shared` triggers `loadPersistentStores`.
+    /// Touching `.shared` here would re-enter the controller during its own
+    /// init, so we defer until the first action that actually needs it.
+    private var container: NSPersistentCloudKitContainer {
+        PersistenceController.shared.container
+    }
 
     enum SyncStatus: Equatable {
         case idle
@@ -48,7 +55,6 @@ class CloudKitSyncManager: ObservableObject {
     }
 
     private init() {
-        self.container = PersistenceController.shared.container
         setupNetworkMonitoring()
         setupCloudKitEventMonitoring()
     }
@@ -167,6 +173,51 @@ class CloudKitSyncManager: ObservableObject {
             return try await container.accountStatus()
         } catch {
             return .couldNotDetermine
+        }
+    }
+
+    /// Active probe — talks to CloudKit directly to verify connectivity and
+    /// that the app's record zone exists. Useful when no events have fired
+    /// yet (e.g., fresh install with empty store) and the user wants
+    /// definitive confirmation that sync is wired up.
+    struct ProbeResult {
+        let accountStatus: CKAccountStatus
+        let userRecordID: String?
+        let zoneCount: Int?
+        let error: String?
+    }
+
+    func probeCloudKit() async -> ProbeResult {
+        let ckContainer = CKContainer(identifier: containerIdentifier)
+        let accountStatus: CKAccountStatus
+        do {
+            accountStatus = try await ckContainer.accountStatus()
+        } catch {
+            return ProbeResult(accountStatus: .couldNotDetermine,
+                               userRecordID: nil,
+                               zoneCount: nil,
+                               error: error.localizedDescription)
+        }
+
+        guard accountStatus == .available else {
+            return ProbeResult(accountStatus: accountStatus,
+                               userRecordID: nil,
+                               zoneCount: nil,
+                               error: nil)
+        }
+
+        do {
+            let recordID = try await ckContainer.userRecordID()
+            let zones = try await ckContainer.privateCloudDatabase.allRecordZones()
+            return ProbeResult(accountStatus: accountStatus,
+                               userRecordID: recordID.recordName,
+                               zoneCount: zones.count,
+                               error: nil)
+        } catch {
+            return ProbeResult(accountStatus: accountStatus,
+                               userRecordID: nil,
+                               zoneCount: nil,
+                               error: error.localizedDescription)
         }
     }
 

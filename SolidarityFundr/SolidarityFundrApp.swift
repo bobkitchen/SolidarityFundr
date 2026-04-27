@@ -11,11 +11,21 @@ import AppIntents
 @main
 struct SolidarityFundrApp: App {
 
+    let persistenceController: PersistenceController
+
     init() {
         // Register App Shortcuts
         SolidarityFundShortcuts.updateAppShortcutParameters()
+
+        // Subscribe the sync manager to NSPersistentCloudKitContainer events
+        // BEFORE the container loads stores. The setup / first-import / first-
+        // export events fire during loadPersistentStores; if the lazy singleton
+        // came alive later (e.g., when the UI first showed the sync panel), the
+        // observer would miss them and "Last sync: never" would persist forever.
+        _ = CloudKitSyncManager.shared
+        self.persistenceController = PersistenceController.shared
     }
-    let persistenceController = PersistenceController.shared
+
     @StateObject private var dataManager = DataManager.shared
     @StateObject private var authManager = AuthenticationManager.shared
 
