@@ -147,7 +147,7 @@ struct MemberDetailView: View {
                     Text(member.name?.prefix(2).uppercased() ?? "??")
                         .font(.title)
                         .fontWeight(.semibold)
-                        .foregroundColor(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                 )
             
             // Member Info
@@ -165,12 +165,12 @@ struct MemberDetailView: View {
                     }
                 }
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 
                 if let joinDate = member.joinDate {
                     Text("Member since \(DateHelper.formatDate(joinDate))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -194,7 +194,7 @@ struct MemberDetailView: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
     }
@@ -344,7 +344,7 @@ struct StatisticItem: View {
             
             Text(label)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -366,7 +366,7 @@ struct QuickActionButton: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(color.opacity(0.1))
-            .foregroundColor(color)
+            .foregroundStyle(color)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
@@ -383,20 +383,20 @@ struct ContactInfoCard: View {
             if let email = member.email {
                 Label(email, systemImage: "envelope.fill")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             if let phone = member.phoneNumber {
                 HStack {
                     Label(phone, systemImage: "phone.fill")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Spacer()
                     
                     if PhoneNumberValidator.validate(phone) {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                             .font(.caption)
                     }
                 }
@@ -416,7 +416,7 @@ struct ContactInfoCard: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
                         .background(Color.green.opacity(0.2))
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
                     Text("Disabled")
@@ -424,7 +424,7 @@ struct ContactInfoCard: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
                         .background(Color.gray.opacity(0.2))
-                        .foregroundColor(.gray)
+                        .foregroundStyle(.gray)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
@@ -433,17 +433,17 @@ struct ContactInfoCard: View {
                 HStack {
                     Text("Last Statement Sent")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(DateHelper.formatDate(lastSent))
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -458,7 +458,7 @@ struct FinancialSummaryCard: View {
             
             HStack {
                 Text("Total Contributions")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Text(CurrencyFormatter.shared.format(member.totalContributions))
                     .fontWeight(.medium)
@@ -466,27 +466,27 @@ struct FinancialSummaryCard: View {
             
             HStack {
                 Text("Active Loans")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Text(CurrencyFormatter.shared.format(member.totalActiveLoanBalance))
                     .fontWeight(.medium)
-                    .foregroundColor(member.hasActiveLoans ? .orange : .primary)
+                    .foregroundStyle(member.hasActiveLoans ? .orange : .primary)
             }
             
             HStack {
                 Text("Available Balance")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Text(CurrencyFormatter.shared.format(member.availableContributions))
                     .fontWeight(.medium)
-                    .foregroundColor(.green)
+                    .foregroundStyle(.green)
             }
             
             if member.cashOutAmount > 0 {
                 Divider()
                 HStack {
                     Text("Cash Out Amount")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(CurrencyFormatter.shared.format(member.cashOutAmount))
                         .fontWeight(.medium)
@@ -494,7 +494,7 @@ struct FinancialSummaryCard: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -510,15 +510,15 @@ struct LoanEligibilityCard: View {
             if member.isEligibleForLoan {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                     Text("Eligible for loans")
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                     Spacer()
                 }
                 
                 HStack {
                     Text("Maximum Loan Amount")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(CurrencyFormatter.shared.format(member.maximumLoanAmount))
                         .fontWeight(.medium)
@@ -526,15 +526,15 @@ struct LoanEligibilityCard: View {
             } else {
                 HStack {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                     Text(eligibilityReason)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                     Spacer()
                 }
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
@@ -570,7 +570,7 @@ struct ContributionChartCard: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -595,7 +595,7 @@ struct ContributionHistoryList: View {
                             .font(.subheadline)
                         Text(payment.paymentMethodType.displayName)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     Spacer()
@@ -607,7 +607,7 @@ struct ContributionHistoryList: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -623,7 +623,7 @@ struct LoanCard: View {
                         .font(.headline)
                     Text("Issued \(DateHelper.formatDate(loan.issueDate))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -642,24 +642,24 @@ struct LoanCard: View {
                     Text("\(Int(loan.completionPercentage))% paid")
                         .font(.caption)
                 }
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 
                 if loan.isOverdue {
                     Label("Payment overdue", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                 }
             } else {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                     Text("Completed on \(DateHelper.formatDate(loan.completedDate))")
                         .font(.caption)
                 }
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -674,7 +674,7 @@ struct TransactionRow: View {
                     .font(.subheadline)
                 Text(DateHelper.formatDate(transaction.transactionDate))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
@@ -682,7 +682,7 @@ struct TransactionRow: View {
             Text(transaction.displayAmount)
                 .font(.subheadline)
                 .fontWeight(.medium)
-                .foregroundColor(transaction.transactionType.isCredit ? .green : .red)
+                .foregroundStyle(transaction.transactionType.isCredit ? .green : .red)
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
@@ -751,7 +751,7 @@ struct EditMemberSheet: View {
                     if !phone.isEmpty && !PhoneNumberValidator.validate(phone) {
                         Text("Please enter a valid Kenyan phone number")
                             .font(.caption)
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                     
                     Toggle("SMS Notifications", isOn: $smsOptIn)
@@ -760,10 +760,10 @@ struct EditMemberSheet: View {
                     if smsOptIn && PhoneNumberValidator.validate(phone) {
                         HStack {
                             Image(systemName: "info.circle")
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                             Text("Member will receive monthly statements via SMS")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -791,11 +791,11 @@ struct EditMemberSheet: View {
                         HStack {
                             Text("Standard limit for \(role.displayName):")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Spacer()
                             Text(CurrencyFormatter.shared.format(standardLimitForRole(role)))
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -805,7 +805,7 @@ struct EditMemberSheet: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Allowed repayment periods:")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
 
                             HStack(spacing: 12) {
                                 ForEach([3, 4, 6], id: \.self) { months in
@@ -831,7 +831,7 @@ struct EditMemberSheet: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Reason for override:")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             TextField("e.g., Board approved exception", text: $overrideReason)
                                 .textFieldStyle(.roundedBorder)
                         }
@@ -839,10 +839,10 @@ struct EditMemberSheet: View {
                         if member.overrideApprovedDate != nil {
                             HStack {
                                 Image(systemName: "checkmark.seal.fill")
-                                    .foregroundColor(.blue)
+                                    .foregroundStyle(.blue)
                                 Text("Override approved: \(member.overrideApprovedDate!, style: .date)")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -850,7 +850,7 @@ struct EditMemberSheet: View {
                     HStack {
                         Text("Loan Override Settings")
                         Image(systemName: "exclamationmark.shield")
-                            .foregroundColor(.orange)
+                            .foregroundStyle(.orange)
                     }
                 } footer: {
                     Text("Override settings allow this member to borrow beyond standard limits or use different repayment periods.")

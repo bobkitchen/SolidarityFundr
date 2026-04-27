@@ -22,6 +22,7 @@ extension Transaction {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "KES"
+        formatter.currencySymbol = "KSH"
         formatter.maximumFractionDigits = 0
         
         let prefix = transactionType.isCredit ? "+" : "-"
@@ -32,6 +33,7 @@ extension Transaction {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "KES"
+        formatter.currencySymbol = "KSH"
         formatter.maximumFractionDigits = 0
         return formatter.string(from: NSNumber(value: balance)) ?? "KSH 0"
     }

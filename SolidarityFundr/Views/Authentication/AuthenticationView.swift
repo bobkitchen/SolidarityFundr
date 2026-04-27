@@ -42,7 +42,7 @@ struct AuthenticationView: View {
                     
                     Text("Solidarity Fund")
                         .font(.title2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -61,7 +61,7 @@ struct AuthenticationView: View {
                 // Security Notice
                 Text("Your financial data is protected")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             .padding()
         }
@@ -85,7 +85,7 @@ struct AuthenticationView: View {
         VStack(spacing: 30) {
             Image(systemName: authManager.biometricType.iconName)
                 .font(.system(size: 60))
-                .foregroundColor(.accentColor)
+                .foregroundStyle(Color.accentColor)
                 .symbolEffect(.pulse, options: .repeating, isActive: isAuthenticating && !reduceMotion)
 
             VStack(spacing: 10) {
@@ -94,7 +94,7 @@ struct AuthenticationView: View {
 
                 Text("Use \(authManager.biometricType.displayName) to access your fund data")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
 
@@ -106,7 +106,7 @@ struct AuthenticationView: View {
                     showingPINEntry = true
                 }
                 .font(.caption)
-                .foregroundColor(.accentColor)
+                .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -126,7 +126,7 @@ struct AuthenticationView: View {
             Button(action: authenticateWithBiometrics) {
                 Label("Authenticate", systemImage: authManager.biometricType.iconName)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(width: 200)
                     .padding()
                     .background(Color.accentColor)
@@ -141,7 +141,7 @@ struct AuthenticationView: View {
         VStack(spacing: 30) {
             Image(systemName: "lock.circle.fill")
                 .font(.system(size: 60))
-                .foregroundColor(.accentColor)
+                .foregroundStyle(Color.accentColor)
                 .symbolEffect(.bounce, value: pinAttempts)
             
             VStack(spacing: 10) {
@@ -150,7 +150,7 @@ struct AuthenticationView: View {
                 
                 Text("Enter your security PIN to access the fund")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             // PIN Input
@@ -183,7 +183,7 @@ struct AuthenticationView: View {
                         Image(systemName: authManager.biometricType.iconName)
                             .font(.title2)
                             .frame(width: 60, height: 60)
-                            .foregroundColor(.accentColor)
+                            .foregroundStyle(Color.accentColor)
                     }
                     
                     numberButton("0")
@@ -197,7 +197,7 @@ struct AuthenticationView: View {
                         Image(systemName: "delete.left.fill")
                             .font(.title2)
                             .frame(width: 60, height: 60)
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                 }
             }
@@ -205,7 +205,7 @@ struct AuthenticationView: View {
             if !pinError.isEmpty {
                 Text(pinError)
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
             }
         }
     }

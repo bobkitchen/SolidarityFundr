@@ -181,153 +181,91 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     let dataManager: DataManager
-    @State private var monthlyContribution: String = ""
-    @State private var annualInterestRate: String = ""
-    @State private var utilizationWarningThreshold: String = ""
-    @State private var minimumFundBalance: String = ""
-    @State private var bobRemainingInvestment: String = ""
+    @State private var monthlyContribution: Double = 2000
+    @State private var annualInterestRatePct: Double = 13
+    @State private var utilizationWarningPct: Double = 60
+    @State private var minimumFundBalance: Double = 50000
+    @State private var bobRemainingInvestment: Double = 100000
     @State private var overrideUtilizationWarning = false
     @State private var overrideMinimumBalance = false
     @State private var allowPartialPayments = false
-    @State private var showingSaveSuccess = false
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.spacingLarge) {
-            // Fund Configuration
-            SettingsSection(title: "Fund Configuration", icon: "banknote") {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
-                    SettingsRow(label: "Monthly Contribution", systemImage: "calendar.badge.plus") {
-                        HStack {
-                            TextField("2000", text: $monthlyContribution)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 100)
-                            Text("KSH")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    SettingsRow(label: "Annual Interest Rate", systemImage: "percent") {
-                        HStack {
-                            TextField("13", text: $annualInterestRate)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 60)
-                            Text("%")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    SettingsRow(label: "Bob's Remaining Investment", systemImage: "person.fill") {
-                        HStack {
-                            TextField("100000", text: $bobRemainingInvestment)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 100)
-                            Text("KSH")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
+        Section("Fund Configuration") {
+            LabeledContent("Monthly Contribution") {
+                TextField("Monthly Contribution", value: $monthlyContribution, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .labelsHidden()
+                Text("KSH").foregroundStyle(.secondary)
             }
-            
-            // Business Rules
-            SettingsSection(title: "Business Rules", icon: "doc.text.fill") {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
-                    SettingsRow(label: "Utilization Warning", systemImage: "exclamationmark.triangle") {
-                        HStack {
-                            TextField("60", text: $utilizationWarningThreshold)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 60)
-                            Text("%")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    SettingsRow(label: "Minimum Fund Balance", systemImage: "chart.line.downtrend.xyaxis") {
-                        HStack {
-                            TextField("50000", text: $minimumFundBalance)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 100)
-                            Text("KSH")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    Toggle("Override Utilization Warning", isOn: $overrideUtilizationWarning)
-                        .tint(.orange)
-                    
-                    Toggle("Override Minimum Balance Warning", isOn: $overrideMinimumBalance)
-                        .tint(.orange)
-                    
-                    Toggle("Allow Partial Loan Payments", isOn: $allowPartialPayments)
-                        .tint(.blue)
-                    
-                    if overrideUtilizationWarning || overrideMinimumBalance {
-                        Label("Warning: Overriding business rules may compromise fund stability", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-                }
+            LabeledContent("Annual Interest Rate") {
+                TextField("Annual Interest Rate", value: $annualInterestRatePct, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .labelsHidden()
+                Text("%").foregroundStyle(.secondary)
             }
-            
-            // Save Button
-            Button {
-                saveSettings()
-            } label: {
-                Label("Save Changes", systemImage: "checkmark.circle.fill")
-            }
-            .controlSize(.large)
-            .alert("Success", isPresented: $showingSaveSuccess) {
-                Button("OK") {}
-            } message: {
-                Text("Settings saved successfully")
+            LabeledContent("Bob's Remaining Investment") {
+                TextField("Bob's Remaining Investment", value: $bobRemainingInvestment, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .labelsHidden()
+                Text("KSH").foregroundStyle(.secondary)
             }
         }
-        .onAppear {
-            loadSettings()
+
+        Section("Business Rules") {
+            LabeledContent("Utilization Warning") {
+                TextField("Utilization Warning", value: $utilizationWarningPct, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .labelsHidden()
+                Text("%").foregroundStyle(.secondary)
+            }
+            LabeledContent("Minimum Fund Balance") {
+                TextField("Minimum Fund Balance", value: $minimumFundBalance, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .labelsHidden()
+                Text("KSH").foregroundStyle(.secondary)
+            }
         }
+
+        Section("Overrides") {
+            Toggle("Override Utilization Warning", isOn: $overrideUtilizationWarning)
+            Toggle("Override Minimum Balance Warning", isOn: $overrideMinimumBalance)
+            Toggle("Allow Partial Loan Payments", isOn: $allowPartialPayments)
+
+            if overrideUtilizationWarning || overrideMinimumBalance {
+                Label("Overriding business rules may compromise fund stability.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+            }
+        }
+        .onAppear { loadSettings() }
+        // Auto-save on every change — macOS Settings convention.
+        .onChange(of: monthlyContribution) { saveSettings() }
+        .onChange(of: annualInterestRatePct) { saveSettings() }
+        .onChange(of: utilizationWarningPct) { saveSettings() }
+        .onChange(of: minimumFundBalance) { saveSettings() }
+        .onChange(of: bobRemainingInvestment) { saveSettings() }
     }
-    
+
     private func loadSettings() {
         guard let settings = dataManager.fundSettings else { return }
-        monthlyContribution = String(format: "%.0f", settings.monthlyContribution)
-        annualInterestRate = String(format: "%.0f", settings.annualInterestRate * 100)
-        utilizationWarningThreshold = String(format: "%.0f", settings.utilizationWarningThreshold * 100)
-        minimumFundBalance = String(format: "%.0f", settings.minimumFundBalance)
-        bobRemainingInvestment = String(format: "%.0f", settings.bobRemainingInvestment)
+        monthlyContribution = settings.monthlyContribution
+        annualInterestRatePct = settings.annualInterestRate * 100
+        utilizationWarningPct = settings.utilizationWarningThreshold * 100
+        minimumFundBalance = settings.minimumFundBalance
+        bobRemainingInvestment = settings.bobRemainingInvestment
     }
-    
+
     private func saveSettings() {
         guard let settings = dataManager.fundSettings else { return }
-        
-        if let contribution = Double(monthlyContribution) {
-            settings.monthlyContribution = contribution
-        }
-        
-        if let rate = Double(annualInterestRate) {
-            settings.annualInterestRate = rate / 100
-        }
-        
-        if let threshold = Double(utilizationWarningThreshold) {
-            settings.utilizationWarningThreshold = threshold / 100
-        }
-        
-        if let minBalance = Double(minimumFundBalance) {
-            settings.minimumFundBalance = minBalance
-        }
-        
-        if let bobInvestment = Double(bobRemainingInvestment) {
-            settings.bobRemainingInvestment = bobInvestment
-        }
-        
+        settings.monthlyContribution = monthlyContribution
+        settings.annualInterestRate = annualInterestRatePct / 100
+        settings.utilizationWarningThreshold = utilizationWarningPct / 100
+        settings.minimumFundBalance = minimumFundBalance
+        settings.bobRemainingInvestment = bobRemainingInvestment
         settings.updatedAt = Date()
-        
-        do {
-            try PersistenceController.shared.container.viewContext.save()
-            showingSaveSuccess = true
-        } catch {
-            print("Error saving settings: \(error)")
-        }
+        try? PersistenceController.shared.container.viewContext.save()
     }
 }
 
@@ -345,7 +283,6 @@ struct MessagingSettingsView: View {
     @State private var isWhatsAppInstalled = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.spacingLarge) {
             // WhatsApp Configuration
             SettingsSection(title: "WhatsApp Configuration", icon: "message.fill") {
                 VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
@@ -355,10 +292,10 @@ struct MessagingSettingsView: View {
                         Spacer()
                         if isWhatsAppInstalled {
                             Label("Installed", systemImage: "checkmark.circle.fill")
-                                .foregroundColor(.green)
+                                .foregroundStyle(.green)
                         } else {
                             Label("Not Installed", systemImage: "xmark.circle.fill")
-                                .foregroundColor(.red)
+                                .foregroundStyle(.red)
                         }
                     }
                     
@@ -376,14 +313,14 @@ struct MessagingSettingsView: View {
                         VStack(alignment: .leading, spacing: DesignSystem.spacingSmall) {
                             Text("Delivery Method")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             
                             Text("Statements will be shared via WhatsApp Desktop with PDFs attached directly")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                                 .padding(.vertical, 8)
                                 .padding(.horizontal, 12)
-                                .background(Color.secondary.opacity(0.1))
+                                .background(.quaternary)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
@@ -413,10 +350,10 @@ struct MessagingSettingsView: View {
                            let nextDate = fundSettings.getNextStatementDate() {
                             HStack {
                                 Text("Next Statement Date")
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Spacer()
                                 Text(DateHelper.formatDate(nextDate))
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                         
@@ -456,7 +393,7 @@ struct MessagingSettingsView: View {
                             if !testPhoneNumber.isEmpty && !PhoneNumberValidator.validate(testPhoneNumber) {
                                 Text("Please enter a valid Kenyan phone number")
                                     .font(.caption)
-                                    .foregroundColor(.red)
+                                    .foregroundStyle(.red)
                             }
                         }
                         
@@ -474,26 +411,26 @@ struct MessagingSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("1. Statements are generated as PDF files", systemImage: "doc.fill")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Label("2. You select members to send statements to", systemImage: "person.3.fill")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Label("3. The macOS sharing service opens with WhatsApp pre-selected", systemImage: "square.and.arrow.up")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Label("4. PDF is attached with a pre-formatted message", systemImage: "paperclip")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Label("5. You review and send directly in WhatsApp", systemImage: "paperplane.fill")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .padding()
-                .background(Color.secondary.opacity(0.1))
+                .background(.quaternary)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             
@@ -501,16 +438,15 @@ struct MessagingSettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("WhatsApp statements include the full PDF report with all transaction details", systemImage: "info.circle")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 
                 Label("Statements can be sent individually or in batches through WhatsApp Desktop", systemImage: "desktopcomputer")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             .padding()
-            .background(Color.secondary.opacity(0.1))
+            .background(.quaternary)
             .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
         .onAppear {
             loadSettings()
             checkWhatsAppInstallation()
@@ -628,7 +564,6 @@ struct MessagingSettingsView: View {
 
 struct SecuritySettingsTabView: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.spacingLarge) {
             SettingsSection(title: "Authentication", icon: "lock.shield") {
                 VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
                     NavigationLink {
@@ -639,7 +574,7 @@ struct SecuritySettingsTabView: View {
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .buttonStyle(.plain)
@@ -648,13 +583,12 @@ struct SecuritySettingsTabView: View {
                         AuthenticationManager.shared.logout()
                     } label: {
                         Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                 }
             }
             
             // Privacy section could go here
-        }
     }
 }
 
@@ -674,7 +608,6 @@ struct DataSyncSettingsView: View {
     @State private var alertMessage = ""
     
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.spacingLarge) {
             // iCloud Sync
             SettingsSection(title: "iCloud Sync", icon: "icloud") {
                 VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
@@ -683,7 +616,7 @@ struct DataSyncSettingsView: View {
                         Label("Sync Status", systemImage: "icloud")
                         Spacer()
                         Text(syncManager.syncStatus.displayText)
-                            .foregroundColor(syncStatusColor)
+                            .foregroundStyle(syncStatusColor)
                             .font(.subheadline)
                         
                         if case .syncing = syncManager.syncStatus {
@@ -702,7 +635,7 @@ struct DataSyncSettingsView: View {
                             Label("Last Sync", systemImage: "clock")
                             Spacer()
                             Text(formatSyncTime(lastSync))
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                                 .font(.subheadline)
                         }
                     }
@@ -712,7 +645,7 @@ struct DataSyncSettingsView: View {
                         Label("Network", systemImage: syncManager.isOnline ? "wifi" : "wifi.slash")
                         Spacer()
                         Text(syncManager.isOnline ? "Online" : "Offline")
-                            .foregroundColor(syncManager.isOnline ? .green : .gray)
+                            .foregroundStyle(syncManager.isOnline ? .green : .gray)
                             .font(.subheadline)
                     }
                     
@@ -752,11 +685,11 @@ struct DataSyncSettingsView: View {
                     if let error = syncManager.syncError {
                         VStack(alignment: .leading, spacing: 4) {
                             Label("Sync Error", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
+                                .foregroundStyle(.red)
                                 .font(.subheadline)
                             Text(error)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -789,11 +722,11 @@ struct DataSyncSettingsView: View {
                         HStack {
                             Text("Backup Location")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Spacer()
                             Text("~/Documents/SolidarityFund/Backups")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     
@@ -826,7 +759,7 @@ struct DataSyncSettingsView: View {
                         showingMessage = true
                     } label: {
                         Label("Delete Test Users", systemImage: "person.3.sequence.fill")
-                            .foregroundColor(.orange)
+                            .foregroundStyle(.orange)
                     }
                     .help("Removes users named: Test User, John Doe, Jane Doe, Test Member, Sample Member")
                     
@@ -837,7 +770,6 @@ struct DataSyncSettingsView: View {
                     }
                 }
             }
-        }
         .onAppear {
             autoSyncEnabled = UserDefaults.standard.object(forKey: "auto_sync_enabled") as? Bool ?? true
             syncInterval = UserDefaults.standard.object(forKey: "sync_interval_minutes") as? Int ?? 3
@@ -926,10 +858,9 @@ struct AdvancedSettingsView: View {
     private var interestManagementSection: some View {
         SettingsSection(title: "Interest Management", icon: "percent") {
             if let fundSettings = dataManager.fundSettings {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
                     HStack {
                         Text("Total Interest Applied")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(CurrencyFormatter.shared.format(fundSettings.totalInterestApplied))
                             .fontWeight(.medium)
@@ -938,21 +869,21 @@ struct AdvancedSettingsView: View {
                     if let lastApplied = fundSettings.lastInterestAppliedDate {
                         HStack {
                             Text("Last Applied")
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Spacer()
                             Text(DateHelper.formatDate(lastApplied))
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     
                     let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
                     HStack {
                         Text("Potential Interest")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(CurrencyFormatter.shared.format(potentialInterest))
                             .fontWeight(.medium)
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                     }
                     
                     Button {
@@ -962,10 +893,9 @@ struct AdvancedSettingsView: View {
                         Label("Apply Annual Interest", systemImage: "percent")
                     }
                     .disabled(potentialInterest <= 0)
-                }
             } else {
                 Text("No fund settings available")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -1021,7 +951,6 @@ struct AdvancedSettingsView: View {
     
     private var displayPreferencesSection: some View {
         SettingsSection(title: "Display & Interface", icon: "paintbrush") {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
                     Toggle(isOn: .init(
                         get: { UserDefaults.standard.bool(forKey: "useLiquidGlass") },
                         set: { UserDefaults.standard.set($0, forKey: "useLiquidGlass") }
@@ -1069,7 +998,7 @@ struct AdvancedSettingsView: View {
                     .onChange(of: compactReports) { _, newValue in
                         UserDefaults.standard.set(newValue, forKey: "compact_reports")
                     }
-            }
+            
         }
     }
     
@@ -1078,21 +1007,21 @@ struct AdvancedSettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Version")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text("1.0.0")
                     }
                     
                     HStack {
                         Text("Developer")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text("Bob Kitchen")
                     }
                     
                     HStack {
                         Text("Fund Started")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         if let fundSettings = dataManager.fundSettings,
                            let createdAt = fundSettings.createdAt {
@@ -1122,48 +1051,35 @@ struct AdvancedSettingsView: View {
     }
 }
 
-// MARK: - Settings Section Component
+// MARK: - Settings Section / Row
 //
-// Stock GroupBox with a labeled header. macOS 26 styles GroupBox as the
-// canonical "settings card" automatically — no custom Material backgrounds
-// or hover animations needed. The previous version layered .performantGlass
-// + .adaptiveShadow + .onHover hover-bounce, which all suppressed the
-// system's automatic Liquid Glass treatment in Settings.
+// Transparent wrappers. The previous versions wrapped content in GroupBox
+// + Label header + Material backgrounds, double-stacking on Form/.grouped.
+// They also put leading icons on every row, which Apple's own Settings
+// don't do. These now emit stock `Section` and `LabeledContent` so tab
+// bodies render as canonical macOS Settings groups.
 
 struct SettingsSection<Content: View>: View {
     let title: String
+    /// Retained for source compatibility but ignored — Apple's Settings
+    /// section headers are plain text, not labels with icons.
     let icon: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                content()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Label(title, systemImage: icon)
-                .font(.headline)
-        }
+        Section(title) { content() }
     }
 }
 
-// MARK: - Settings Row Component
-//
-// Uses LabeledContent — the stock SwiftUI "label : value" row. Renders with
-// system spacing, alignment, and Dynamic Type support automatically.
-
 struct SettingsRow<Content: View>: View {
     let label: String
+    /// Retained for source compatibility but ignored — Apple's Settings
+    /// rows don't have leading icons in the General/Messaging/etc. tabs.
     let systemImage: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        LabeledContent {
-            content()
-        } label: {
-            Label(label, systemImage: systemImage)
-        }
+        LabeledContent(label) { content() }
     }
 }
 

@@ -88,70 +88,36 @@ struct LoansListView: View {
     // MARK: - View Components
 
     private var fundStatusHeader: some View {
-        VStack(spacing: 12) {
-            // Title and primary actions are now in .navigationTitle / .toolbar.
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Loan Management")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                Text(Date().formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
-                    .foregroundColor(Color.secondary.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
-            
-            // Fund Balance
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Fund Balance")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(viewModel.formatCurrency(viewModel.fundBalance))
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                }
-                
-                Spacer()
-                
-                // Utilization Gauge
-                UtilizationGauge(
-                    percentage: viewModel.utilizationPercentage,
-                    showWarning: viewModel.utilizationWarning
-                )
-            }
-            .padding(.horizontal)
-            
-            // Loan Statistics
-            HStack(spacing: 20) {
-                StatisticCard(
-                    title: "Active Loans",
-                    value: "\(viewModel.activeLoans.count)",
-                    icon: "creditcard.fill",
-                    color: .blue
-                )
-                
-                StatisticCard(
-                    title: "Total Outstanding",
-                    value: viewModel.formatCurrency(viewModel.totalActiveLoansAmount),
-                    icon: "dollarsign.circle.fill",
-                    color: .orange
-                )
-                
-                StatisticCard(
-                    title: "Overdue",
-                    value: "\(viewModel.overdueLoans.count)",
-                    icon: "exclamationmark.triangle.fill",
-                    color: viewModel.overdueLoans.isEmpty ? .green : .red
-                )
-            }
-            .padding(.horizontal)
+        // Compact stat strip with fund balance + utilization gauge inline.
+        HStack(spacing: 16) {
+            MiniMetricCard(
+                title: "Fund Balance",
+                value: viewModel.formatCurrency(viewModel.fundBalance),
+                systemImage: "banknote.fill",
+                tint: .green
+            )
+            MiniMetricCard(
+                title: "Active Loans",
+                value: "\(viewModel.activeLoans.count)",
+                systemImage: "creditcard.fill",
+                tint: .blue
+            )
+            MiniMetricCard(
+                title: "Outstanding",
+                value: viewModel.formatCurrency(viewModel.totalActiveLoansAmount),
+                systemImage: "dollarsign.circle.fill",
+                tint: .orange
+            )
+            MiniMetricCard(
+                title: "Overdue",
+                value: "\(viewModel.overdueLoans.count)",
+                systemImage: "exclamationmark.triangle.fill",
+                tint: viewModel.overdueLoans.isEmpty ? .green : .red
+            )
         }
-        .padding()
-        .background(Color.secondary.opacity(0.1))
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
     
     private var filterBar: some View {
@@ -177,7 +143,7 @@ struct LoansListView: View {
                     )
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 
@@ -253,14 +219,14 @@ struct LoanRowView: View {
                         HStack {
                             Text(loan.member?.memberRole.displayName ?? "")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             
                             if loan.isOverdue {
                                 Text("•")
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Label("Overdue", systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption)
-                                    .foregroundColor(.red)
+                                    .foregroundStyle(.red)
                             }
                         }
                     }
@@ -273,14 +239,14 @@ struct LoanRowView: View {
                             .fontWeight(.semibold)
                         Text("Issued \(DateHelper.formatDate(loan.issueDate))")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 
                 // Progress Bar
                 VStack(alignment: .leading, spacing: 4) {
                     ProgressView(value: loan.completionPercentage, total: 100)
-                        .tint(loan.isOverdue ? .red : .accentColor)
+                        .tint(loan.isOverdue ? .red : Color.accentColor)
                     
                     HStack {
                         Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
@@ -297,7 +263,7 @@ struct LoanRowView: View {
                                 .font(.caption)
                         }
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 4)
@@ -334,7 +300,7 @@ struct NewLoanSheet: View {
                                         Spacer()
                                         Text("Max: \(CurrencyFormatter.shared.format(member.maximumLoanAmount))")
                                             .font(.caption)
-                                            .foregroundColor(.secondary)
+                                            .foregroundStyle(.secondary)
                                     }
                                     .tag(member as Member?)
                                 }
@@ -356,11 +322,11 @@ struct NewLoanSheet: View {
                                     HStack {
                                         Text("Maximum Allowed")
                                             .font(.caption)
-                                            .foregroundColor(.secondary)
+                                            .foregroundStyle(.secondary)
                                         Spacer()
                                         Text(CurrencyFormatter.shared.format(member.maximumLoanAmount))
                                             .font(.caption)
-                                            .foregroundColor(.secondary)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                                 
@@ -414,7 +380,7 @@ struct NewLoanSheet: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Override allows bypassing loan limits and repayment period restrictions. A reason is required for audit purposes.")
                                         .font(.caption)
-                                        .foregroundColor(.orange)
+                                        .foregroundStyle(.orange)
 
                                     TextField("Reason for override (required)", text: $viewModel.overrideReason)
                                         .textFieldStyle(.roundedBorder)
@@ -423,19 +389,19 @@ struct NewLoanSheet: View {
                                         HStack {
                                             Text("Standard limit:")
                                                 .font(.caption)
-                                                .foregroundColor(.secondary)
+                                                .foregroundStyle(.secondary)
                                             Text(CurrencyFormatter.shared.format(member.baseLoanLimit))
                                                 .font(.caption)
-                                                .foregroundColor(.secondary)
+                                                .foregroundStyle(.secondary)
                                         }
                                         if member.hasCustomLoanLimit {
                                             HStack {
                                                 Text("Custom limit:")
                                                     .font(.caption)
-                                                    .foregroundColor(.blue)
+                                                    .foregroundStyle(.blue)
                                                 Text(CurrencyFormatter.shared.format(member.customLoanLimit))
                                                     .font(.caption)
-                                                    .foregroundColor(.blue)
+                                                    .foregroundStyle(.blue)
                                             }
                                         }
                                     }
@@ -445,7 +411,7 @@ struct NewLoanSheet: View {
                             HStack {
                                 Text("Admin Override")
                                 Image(systemName: "exclamationmark.shield")
-                                    .foregroundColor(.orange)
+                                    .foregroundStyle(.orange)
                             }
                         }
 
@@ -463,7 +429,7 @@ struct NewLoanSheet: View {
                                                 .fontWeight(.medium)
                                             Text(DateHelper.formatDate(schedule.dueDate))
                                                 .font(.caption)
-                                                .foregroundColor(.secondary)
+                                                .foregroundStyle(.secondary)
                                         }
                                     }
                                 }
@@ -471,11 +437,11 @@ struct NewLoanSheet: View {
                                 HStack {
                                     Text("Monthly Loan Payment")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                     Spacer()
                                     Text("(Contribution paid separately)")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -485,7 +451,7 @@ struct NewLoanSheet: View {
                             Section {
                                 ForEach(viewModel.validationWarnings, id: \.self) { warning in
                                     Label(warning, systemImage: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.orange)
+                                        .foregroundStyle(.orange)
                                         .font(.caption)
                                 }
                             }
@@ -549,16 +515,16 @@ struct UtilizationGauge: View {
         VStack(alignment: .trailing, spacing: 4) {
             Text("Utilization")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             HStack(spacing: 4) {
                 Text(String(format: "%.0f%%", percentage * 100))
                     .font(.title3)
                     .fontWeight(.semibold)
-                    .foregroundColor(gaugeColor)
+                    .foregroundStyle(gaugeColor)
                 
                 Image(systemName: showWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundColor(gaugeColor)
+                    .foregroundStyle(gaugeColor)
             }
         }
     }

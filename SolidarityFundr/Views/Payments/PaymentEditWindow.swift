@@ -23,7 +23,7 @@ struct PaymentEditWindow: View {
                         .fontWeight(.bold)
                     Text("Modify payment details for \(payment.member?.name ?? "Unknown")")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()

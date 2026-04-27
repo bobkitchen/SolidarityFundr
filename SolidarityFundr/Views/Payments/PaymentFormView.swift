@@ -93,14 +93,14 @@ struct PaymentFormView: View {
                         HStack {
                             Text(member.memberRole.displayName)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             
                             if member.hasActiveLoans {
                                 Text("•")
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Label("Has active loan", systemImage: "creditcard.fill")
                                     .font(.caption)
-                                    .foregroundColor(.orange)
+                                    .foregroundStyle(.orange)
                             }
                         }
                     }
@@ -110,7 +110,7 @@ struct PaymentFormView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("Balance")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text(CurrencyFormatter.shared.format(member.totalContributions))
                             .font(.subheadline)
                             .fontWeight(.medium)
@@ -125,14 +125,14 @@ struct PaymentFormView: View {
                         HStack {
                             Text(preselectedMember.memberRole.displayName)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             
                             if preselectedMember.hasActiveLoans {
                                 Text("•")
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Label("Has active loan", systemImage: "creditcard.fill")
                                     .font(.caption)
-                                    .foregroundColor(.orange)
+                                    .foregroundStyle(.orange)
                             }
                         }
                     }
@@ -142,7 +142,7 @@ struct PaymentFormView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("Balance")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text(CurrencyFormatter.shared.format(preselectedMember.totalContributions))
                             .font(.subheadline)
                             .fontWeight(.medium)
@@ -159,7 +159,7 @@ struct PaymentFormView: View {
                                 if member.hasActiveLoans {
                                     Text("Has active loan")
                                         .font(.caption)
-                                        .foregroundColor(.orange)
+                                        .foregroundStyle(.orange)
                                 }
                             }
                             
@@ -196,7 +196,7 @@ struct PaymentFormView: View {
                         if availableLoans.isEmpty {
                             Text("No loans found for this member")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         } else if availableLoans.count == 1, let loan = availableLoans.first {
                             LoanInfoRow(loan: loan)
                                 .onAppear {
@@ -205,7 +205,7 @@ struct PaymentFormView: View {
                             if loan.loanStatus == .completed {
                                 Label("This loan is marked as completed", systemImage: "info.circle")
                                     .font(.caption)
-                                    .foregroundColor(.orange)
+                                    .foregroundStyle(.orange)
                             }
                         } else {
                             // Multiple loans - picker
@@ -217,12 +217,12 @@ struct PaymentFormView: View {
                                         if loan.loanStatus == .completed {
                                             Text("(Completed)")
                                                 .font(.caption)
-                                                .foregroundColor(.green)
+                                                .foregroundStyle(.green)
                                         }
                                         Spacer()
                                         Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
                                             .font(.caption)
-                                            .foregroundColor(.secondary)
+                                            .foregroundStyle(.secondary)
                                     }
                                     .tag(loan as Loan?)
                                 }
@@ -233,9 +233,9 @@ struct PaymentFormView: View {
                     // New payment mode with no active loans - contribution only
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                         Text("Monthly Contribution")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -252,7 +252,7 @@ struct PaymentFormView: View {
                     .multilineTextAlignment(.trailing)
                     .focused($focusedField, equals: .amount)
                 Text("KSH")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             // Payment Method
@@ -273,7 +273,7 @@ struct PaymentFormView: View {
             if viewModel.isLoanPayment {
                 HStack {
                     Label("Loan Repayment", systemImage: "creditcard.fill")
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                     Spacer()
                     Text(CurrencyFormatter.shared.format(Double(viewModel.paymentAmount) ?? 0))
                         .fontWeight(.medium)
@@ -281,7 +281,7 @@ struct PaymentFormView: View {
                 
                 Text("Monthly contributions should be paid separately")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 
                 // Show remaining balance after payment
                 if let loan = viewModel.selectedLoan {
@@ -290,17 +290,17 @@ struct PaymentFormView: View {
                     HStack {
                         Text("Remaining Loan Balance")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(CurrencyFormatter.shared.format(remainingBalance))
                             .font(.caption)
-                            .foregroundColor(remainingBalance > 0 ? .orange : .green)
+                            .foregroundStyle(remainingBalance > 0 ? .orange : .green)
                     }
                 }
             } else {
                 HStack {
                     Label("Monthly Contribution", systemImage: "banknote.fill")
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                     Spacer()
                     Text(CurrencyFormatter.shared.format(viewModel.contributionAmount))
                         .fontWeight(.medium)
@@ -320,7 +320,7 @@ struct PaymentFormView: View {
         Section {
             ForEach(viewModel.validationWarnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
+                    .foregroundStyle(.orange)
                     .font(.caption)
             }
         }
@@ -415,7 +415,7 @@ struct LoanInfoRow: View {
                         .fontWeight(.medium)
                     Text("Issued \(DateHelper.formatDate(loan.issueDate))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -423,14 +423,14 @@ struct LoanInfoRow: View {
                 if loan.isOverdue {
                     Label("Overdue", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                 }
             }
             
             // Progress
             VStack(spacing: 4) {
                 ProgressView(value: loan.completionPercentage, total: 100)
-                    .tint(loan.isOverdue ? .red : .accentColor)
+                    .tint(loan.isOverdue ? .red : Color.accentColor)
                 
                 HStack {
                     Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
@@ -439,7 +439,7 @@ struct LoanInfoRow: View {
                     Text("\(Int(loan.completionPercentage))% paid")
                         .font(.caption)
                 }
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)

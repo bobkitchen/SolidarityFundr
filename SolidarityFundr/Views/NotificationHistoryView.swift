@@ -132,7 +132,7 @@ struct NotificationHistoryView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Communication History")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             HStack {
                 Text("SMS Notifications")
@@ -150,7 +150,7 @@ struct NotificationHistoryView: View {
             
             Text(Date().formatted(date: .abbreviated, time: .omitted))
                 .font(.caption)
-                .foregroundColor(Color.secondary.opacity(0.7))
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
@@ -162,7 +162,7 @@ struct NotificationHistoryView: View {
             // Search and Member Filter
             HStack {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 
                 TextField("Search notifications...", text: $searchText)
                     .textFieldStyle(.plain)
@@ -185,7 +185,7 @@ struct NotificationHistoryView: View {
                 .frame(width: 120)
             }
             .padding(12)
-            .background(Color.secondary.opacity(0.1))
+            .background(.quaternary)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             
             // Status Filter
@@ -257,14 +257,14 @@ struct NotificationHistoryView: View {
         VStack(spacing: 16) {
             Image(systemName: "tray")
                 .font(.system(size: 48))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             Text("No notifications found")
                 .font(.headline)
             
             Text("Notifications will appear here once SMS statements are sent")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -309,7 +309,7 @@ struct NotificationRow: View {
             HStack {
                 // Status Icon
                 Image(systemName: statusIcon)
-                    .foregroundColor(statusColor)
+                    .foregroundStyle(statusColor)
                     .font(.title3)
                 
                 VStack(alignment: .leading, spacing: 2) {
@@ -318,7 +318,7 @@ struct NotificationRow: View {
                             .font(.headline)
                         
                         Text("•")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         
                         Text(notification.type ?? "statement")
                             .font(.caption)
@@ -330,7 +330,7 @@ struct NotificationRow: View {
                     
                     Text(notification.recipient ?? "No recipient")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -339,7 +339,7 @@ struct NotificationRow: View {
                     if let sentDate = notification.sentDate {
                         Text(DateHelper.formatDate(sentDate))
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     if notification.cost > 0 {
@@ -354,7 +354,7 @@ struct NotificationRow: View {
             if let content = notification.messageContent {
                 Text(content)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -363,12 +363,12 @@ struct NotificationRow: View {
             if let error = notification.errorMessage {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                         .font(.caption)
                     
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                 }
             }
             
@@ -380,7 +380,7 @@ struct NotificationRow: View {
                     
                     Text(url)
                         .font(.caption)
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -439,8 +439,8 @@ struct FilterChip: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(isSelected ? color.opacity(0.2) : Color.secondary.opacity(0.1))
-            .foregroundColor(isSelected ? color : .secondary)
+            .background(isSelected ? color.opacity(0.2) : Color.secondary.opacity(0.3))
+            .foregroundStyle(isSelected ? color : .secondary)
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
@@ -457,7 +457,7 @@ struct NotificationStatCard: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
                     .font(.caption)
                 Spacer()
             }
@@ -468,11 +468,11 @@ struct NotificationStatCard: View {
             
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

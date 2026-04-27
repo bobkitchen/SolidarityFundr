@@ -65,9 +65,11 @@ struct DashboardView: View {
     @ViewBuilder
     private var sidebar: some View {
         List(selection: $selection) {
-            ForEach(DashboardSection.allCases) { section in
+            ForEach(Array(DashboardSection.allCases.enumerated()), id: \.element) { index, section in
                 Label(section.title, systemImage: section.systemImage)
                     .tag(Optional(section))
+                    // ⌘1–5 to switch tabs.
+                    .keyboardShortcutForSidebarIndex(index, action: { selection = section })
             }
 
             Section("Fund Status") {
@@ -94,6 +96,33 @@ struct DashboardView: View {
         case .payments: PaymentsView()
         case .reports: ReportsView()
         }
+    }
+}
+
+// MARK: - Sidebar keyboard shortcut helper
+
+private extension View {
+    /// Attach a ⌘<n+1> keyboard shortcut to the sidebar nav item at `index`.
+    /// SwiftUI gives `tag(_:)`-based selection nothing for free here, so we
+    /// overlay a hidden Button that owns the shortcut.
+    @ViewBuilder
+    func keyboardShortcutForSidebarIndex(_ index: Int, action: @escaping () -> Void) -> some View {
+        if let key = ["1", "2", "3", "4", "5"][safe: index] {
+            self.background(
+                Button(action: action) { EmptyView() }
+                    .keyboardShortcut(KeyEquivalent(Character(key)), modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+            )
+        } else {
+            self
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
@@ -144,10 +173,14 @@ struct OverviewView: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var isRecalculating = false
 
+    private var fundBalance: Double { dataManager.fundSettings?.calculateFundBalance() ?? 0 }
+    private var utilization: Double { dataManager.fundSettings?.calculateUtilizationPercentage() ?? 0 }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                metricsGrid
+                heroFundBalance
+                secondaryMetrics
                 recentTransactions
             }
             .padding()
@@ -174,33 +207,76 @@ struct OverviewView: View {
         }
     }
 
+    // Hero card: fund balance reads as the most important figure on the page,
+    // matching the pattern Wallet / Numbers / banking apps use for an account.
     @ViewBuilder
-    private var metricsGrid: some View {
-        let columns = [GridItem(.adaptive(minimum: 200), spacing: 16)]
+    private var heroFundBalance: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Fund Balance", systemImage: "banknote.fill")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .labelStyle(.titleAndIcon)
+
+                Text(CurrencyFormatter.shared.format(fundBalance))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Fund balance, \(CurrencyFormatter.shared.format(fundBalance))")
+
+                HStack(spacing: 24) {
+                    inlineStat(
+                        label: "Utilization",
+                        value: String(format: "%.1f%%", utilization * 100),
+                        color: utilizationColor(utilization)
+                    )
+                    inlineStat(
+                        label: "Active Loans",
+                        value: "\(dataManager.activeLoans.count)",
+                        color: .orange
+                    )
+                    inlineStat(
+                        label: "Active Members",
+                        value: "\(dataManager.members.filter { $0.memberStatus == .active }.count)",
+                        color: .blue
+                    )
+                    Spacer()
+                }
+                .font(.caption)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func inlineStat(label: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).foregroundStyle(color).fontWeight(.medium)
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryMetrics: some View {
+        let columns = [GridItem(.adaptive(minimum: 220), spacing: 16)]
         LazyVGrid(columns: columns, spacing: 16) {
-            StatCard(
-                title: "Fund Balance",
-                value: formatCurrency(dataManager.fundSettings?.calculateFundBalance() ?? 0),
-                systemImage: "banknote.fill",
-                color: .green
+            MiniMetricCard(
+                title: "Total Contributions",
+                value: CurrencyFormatter.shared.format(dataManager.members.reduce(0) { $0 + $1.totalContributions }),
+                systemImage: "tray.and.arrow.down.fill",
+                tint: .blue
             )
-            StatCard(
-                title: "Active Members",
-                value: "\(dataManager.members.filter { $0.memberStatus == .active }.count)",
-                systemImage: "person.3.fill",
-                color: .blue
-            )
-            StatCard(
-                title: "Active Loans",
-                value: "\(dataManager.activeLoans.count)",
+            MiniMetricCard(
+                title: "Outstanding Loans",
+                value: CurrencyFormatter.shared.format(dataManager.activeLoans.reduce(0) { $0 + $1.balance }),
                 systemImage: "creditcard.fill",
-                color: .orange
+                tint: .orange
             )
-            StatCard(
-                title: "Utilization",
-                value: String(format: "%.1f%%", (dataManager.fundSettings?.calculateUtilizationPercentage() ?? 0) * 100),
-                systemImage: "percent",
-                color: utilizationColor(dataManager.fundSettings?.calculateUtilizationPercentage() ?? 0)
+            MiniMetricCard(
+                title: "Members",
+                value: "\(dataManager.members.count)",
+                systemImage: "person.3.fill",
+                tint: .green
             )
         }
     }
@@ -228,10 +304,6 @@ struct OverviewView: View {
         }
     }
 
-    func formatCurrency(_ amount: Double) -> String {
-        CurrencyFormatter.shared.format(amount)
-    }
-
     func utilizationColor(_ utilization: Double) -> Color {
         if utilization >= 0.6 { return .red }
         if utilization >= 0.4 { return .orange }
@@ -239,23 +311,25 @@ struct OverviewView: View {
     }
 }
 
-// MARK: - Stat Card
+// MARK: - MetricCard
 //
-// A simple GroupBox-style card. No hand-rolled glass.
+// Single canonical small-card metric component used across Overview, Members,
+// Loans, Payments. Replaces the previous StatCard / StatisticCard / SummaryCard
+// duplicates.
 
-struct StatCard: View {
+struct MiniMetricCard: View {
     let title: String
     let value: String
     let systemImage: String
-    let color: Color
+    let tint: Color
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: systemImage)
-                        .foregroundStyle(color)
-                        .font(.title2)
+                        .foregroundStyle(tint)
+                        .font(.title3)
                         .accessibilityHidden(true)
                     Spacer()
                 }
@@ -263,8 +337,8 @@ struct StatCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(value)
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

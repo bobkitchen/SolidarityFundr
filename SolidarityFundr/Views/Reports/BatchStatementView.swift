@@ -112,7 +112,7 @@ struct BatchStatementView: View {
                     
                     Text("Select members to generate statements for")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -122,7 +122,7 @@ struct BatchStatementView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -135,15 +135,15 @@ struct BatchStatementView: View {
         HStack(spacing: 16) {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                 
                 DatePicker("From", selection: $statementStartDate, displayedComponents: .date)
                     .datePickerStyle(.compact)
                     .labelsHidden()
                 
                 Text("–")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 
                 DatePicker("To", selection: $statementEndDate, displayedComponents: .date)
                     .datePickerStyle(.compact)
@@ -181,9 +181,9 @@ struct BatchStatementView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: selectAll ? "checkmark.square.fill" : "square")
-                        .font(.system(size: 14))
+                        .font(.body)
                     Text("Select All")
-                        .font(.system(size: 13))
+                        .font(.footnote)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -200,7 +200,7 @@ struct BatchStatementView: View {
         HStack {
             Text("\(selectedCount) member\(selectedCount == 1 ? "" : "s") selected")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             Spacer()
             
@@ -322,7 +322,7 @@ struct MemberSelectionRow: View {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(member.name ?? "Unknown")
@@ -332,18 +332,18 @@ struct MemberSelectionRow: View {
                     HStack(spacing: 8) {
                         Text(member.memberRole.displayName)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         
                         if member.phoneNumber != nil {
                             Image(systemName: "phone.fill")
                                 .font(.caption2)
-                                .foregroundColor(.green)
+                                .foregroundStyle(.green)
                         }
                         
                         if let lastSent = member.lastStatementSentDate {
                             Text("• Last sent: \(DateHelper.formatShortDate(lastSent))")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -356,7 +356,7 @@ struct MemberSelectionRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.red.opacity(0.2))
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
@@ -387,8 +387,8 @@ struct FilterButton: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.1))
-            .foregroundColor(isSelected ? .white : .primary)
+            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.3))
+            .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
@@ -404,7 +404,7 @@ struct SuccessView: View {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 60))
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
             
             Text("Statements Generated")
                 .font(.title2)
@@ -412,7 +412,7 @@ struct SuccessView: View {
             
             Text("\(count) statement\(count == 1 ? "" : "s") successfully generated")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             HStack(spacing: 16) {
                 Button("Done") {
@@ -458,7 +458,7 @@ struct BatchProgressView: View {
             
             Text("\(current) of \(total)")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .padding()
         .frame(width: 300)

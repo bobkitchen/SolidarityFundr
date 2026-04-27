@@ -19,12 +19,12 @@ struct CloudKitStatusView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(syncManager.syncStatus.displayText)
                     .font(.caption)
-                    .foregroundColor(syncStatusColor)
+                    .foregroundStyle(syncStatusColor)
                 
                 if let lastSync = syncManager.lastSyncDate {
                     Text("Last sync: \(formatSyncTime(lastSync))")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -73,7 +73,7 @@ struct CloudKitStatusView: View {
                 Image(systemName: "icloud.slash")
             }
         }
-        .foregroundColor(syncStatusColor)
+        .foregroundStyle(syncStatusColor)
         .font(.caption)
     }
     
@@ -123,7 +123,7 @@ struct CloudKitDetailsView: View {
                 GroupBox("iCloud Account") {
                     HStack {
                         Image(systemName: "person.icloud")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                         Text(cloudKitStatus)
                         Spacer()
                     }
@@ -134,20 +134,20 @@ struct CloudKitDetailsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Image(systemName: syncManager.isOnline ? "wifi" : "wifi.slash")
-                                .foregroundColor(syncManager.isOnline ? .green : .red)
+                                .foregroundStyle(syncManager.isOnline ? .green : .red)
                             Text(syncManager.isOnline ? "Online" : "Offline")
                         }
                         
                         HStack {
                             Image(systemName: "arrow.triangle.2.circlepath")
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                             Text("Status: \(syncManager.syncStatus.displayText)")
                         }
                         
                         if let lastSync = syncManager.lastSyncDate {
                             HStack {
                                 Image(systemName: "clock")
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Text("Last sync: \(DateFormatter.fullDateTime.string(from: lastSync))")
                             }
                         }
@@ -159,7 +159,7 @@ struct CloudKitDetailsView: View {
                     GroupBox("Error Details") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(error)
-                                .foregroundColor(.red)
+                                .foregroundStyle(.red)
                                 .font(.caption)
                             
                             Button("Clear Error") {
@@ -182,7 +182,7 @@ struct CloudKitDetailsView: View {
                         
                         Text("The app automatically syncs every 3 minutes when online.")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
                 }

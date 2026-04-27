@@ -89,48 +89,30 @@ struct MembersListView: View {
     // MARK: - View Components
     
     private var memberStatisticsHeader: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Title and primary actions are now in .navigationTitle / .toolbar.
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Team Management")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                Text(Date().formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
-                    .foregroundColor(Color.secondary.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
-            
-            // Statistics
-            HStack(spacing: 20) {
-                StatisticCard(
-                    title: "Active Members",
-                    value: "\(viewModel.activeMembersCount)",
-                    icon: "person.fill.checkmark",
-                    color: .green
-                )
-                
-                StatisticCard(
-                    title: "Total Contributions",
-                    value: viewModel.formatCurrency(viewModel.totalContributions),
-                    icon: "banknote.fill",
-                    color: .blue
-                )
-                
-                StatisticCard(
-                    title: "Members with Loans",
-                    value: "\(viewModel.members.filter { $0.hasActiveLoans }.count)",
-                    icon: "creditcard.fill",
-                    color: .orange
-                )
-            }
-            .padding(.horizontal)
-            .padding(.bottom)
+        // Compact stat strip — title and date were redundant with .navigationTitle.
+        HStack(spacing: 16) {
+            MiniMetricCard(
+                title: "Active Members",
+                value: "\(viewModel.activeMembersCount)",
+                systemImage: "person.fill.checkmark",
+                tint: .green
+            )
+            MiniMetricCard(
+                title: "Total Contributions",
+                value: viewModel.formatCurrency(viewModel.totalContributions),
+                systemImage: "banknote.fill",
+                tint: .blue
+            )
+            MiniMetricCard(
+                title: "Members with Loans",
+                value: "\(viewModel.members.filter { $0.hasActiveLoans }.count)",
+                systemImage: "creditcard.fill",
+                tint: .orange
+            )
         }
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
     
     private var filterBar: some View {
@@ -156,7 +138,7 @@ struct MembersListView: View {
                     )
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 
@@ -178,7 +160,7 @@ struct MembersListView: View {
                     )
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 }
@@ -299,7 +281,7 @@ struct MemberRowView: View {
                     .overlay(
                         Text(member.name?.prefix(2).uppercased() ?? "??")
                             .font(.headline)
-                            .foregroundColor(.accentColor)
+                            .foregroundStyle(Color.accentColor)
                     )
                 
                 // Member Info
@@ -307,7 +289,7 @@ struct MemberRowView: View {
                     HStack {
                         Text(member.name ?? "Unknown")
                             .font(.headline)
-                            .foregroundColor(.primary)
+                            .foregroundStyle(.primary)
                         
                         if member.memberStatus != .active {
                             StatusBadge(status: member.memberStatus)
@@ -317,13 +299,13 @@ struct MemberRowView: View {
                     HStack {
                         Label(member.memberRole.displayName, systemImage: "briefcase.fill")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         
                         if member.hasActiveLoans {
                             Spacer()
                             Label("Active Loan", systemImage: "creditcard.fill")
                                 .font(.caption)
-                                .foregroundColor(.orange)
+                                .foregroundStyle(.orange)
                         }
                     }
                 }
@@ -338,12 +320,12 @@ struct MemberRowView: View {
                     
                     Text("Contributions")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Image(systemName: "chevron.right")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
         }
@@ -404,7 +386,7 @@ struct AddMemberSheet: View {
                     if !viewModel.newMemberPhone.isEmpty && !PhoneNumberValidator.validate(viewModel.newMemberPhone) {
                         Text("Please enter a valid Kenyan phone number")
                             .font(.caption)
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                     
                     Toggle("SMS Notifications", isOn: $viewModel.newMemberSMSOptIn)
@@ -413,10 +395,10 @@ struct AddMemberSheet: View {
                     if viewModel.newMemberSMSOptIn && PhoneNumberValidator.validate(viewModel.newMemberPhone) {
                         HStack {
                             Image(systemName: "info.circle")
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                             Text("Member will receive monthly statements via SMS")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -430,7 +412,7 @@ struct AddMemberSheet: View {
                     Section {
                         ForEach(viewModel.validationWarnings, id: \.self) { warning in
                             Label(warning, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
+                                .foregroundStyle(.orange)
                                 .font(.caption)
                         }
                     }
@@ -474,7 +456,7 @@ struct StatisticCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
                 Spacer()
             }
             
@@ -484,11 +466,11 @@ struct StatisticCard: View {
             
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -503,7 +485,7 @@ struct StatusBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .background(backgroundColor)
-            .foregroundColor(foregroundColor)
+            .foregroundStyle(foregroundColor)
             .clipShape(RoundedRectangle(cornerRadius: 4))
     }
     

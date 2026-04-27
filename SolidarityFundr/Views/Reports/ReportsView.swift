@@ -129,19 +129,7 @@ struct ReportsView: View {
     // MARK: - View Components
     
     private var reportHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Analytics & Insights")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            Text(Date().formatted(date: .abbreviated, time: .omitted))
-                .font(.caption)
-                .foregroundColor(Color.secondary.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 16)
+        EmptyView()
     }
 
     private var reportTypeSelector: some View {
@@ -165,15 +153,15 @@ struct ReportsView: View {
         HStack(spacing: 16) {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                 
                 DatePicker("From", selection: $startDate, displayedComponents: .date)
                     .datePickerStyle(.compact)
                     .labelsHidden()
                 
                 Text("–")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 
                 DatePicker("To", selection: $endDate, displayedComponents: .date)
                     .datePickerStyle(.compact)
@@ -313,7 +301,7 @@ struct MemberStatementReport: View {
                             Image(systemName: "chevron.left")
                             Text("Select Member")
                         }
-                        .foregroundColor(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.plain)
                     
@@ -437,7 +425,7 @@ struct MemberStatementActions: View {
                         .labelsHidden()
                     
                     Text("–")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     DatePicker("To", selection: $statementPeriodEnd, displayedComponents: .date)
                         .datePickerStyle(.compact)
@@ -467,7 +455,7 @@ struct MemberStatementActions: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(Color.accentColor)
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -490,7 +478,7 @@ struct MemberStatementActions: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(canSendMessage && pdfURL != nil ? Color.green : Color.gray)
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -502,10 +490,10 @@ struct MemberStatementActions: View {
             if !canSendMessage {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                     Text(getMessageDisabledReason())
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
@@ -515,7 +503,7 @@ struct MemberStatementActions: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Statements")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     ForEach(recentNotifications.prefix(3)) { notification in
                         HStack {
@@ -530,7 +518,7 @@ struct MemberStatementActions: View {
                             
                             Text(notification.status ?? "sent")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -540,7 +528,7 @@ struct MemberStatementActions: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
@@ -627,7 +615,7 @@ struct FundBalanceCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Contributions", systemImage: "plus.circle.fill")
                         .font(.caption)
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                     Text(CurrencyFormatter.shared.format(fundSummary.totalContributions))
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -636,7 +624,7 @@ struct FundBalanceCard: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Label("Active Loans", systemImage: "minus.circle.fill")
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                     Text(CurrencyFormatter.shared.format(fundSummary.totalActiveLoans))
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -645,7 +633,7 @@ struct FundBalanceCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
@@ -660,7 +648,7 @@ struct ReportMetricCard: View {
         VStack(spacing: 8) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
                 Spacer()
             }
             
@@ -670,11 +658,11 @@ struct ReportMetricCard: View {
             
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -690,7 +678,7 @@ struct UtilizationChart: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.2))
+                        .fill(Color.secondary.opacity(0.3))
                         .frame(height: 30)
                     
                     RoundedRectangle(cornerRadius: 8)
@@ -700,7 +688,7 @@ struct UtilizationChart: View {
                     Text(String(format: "%.1f%%", utilization * 100))
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 8)
                 }
             }
@@ -709,18 +697,18 @@ struct UtilizationChart: View {
             HStack {
                 Text("Warning threshold: 60%")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Circle()
                     .fill(utilizationColor)
                     .frame(width: 8, height: 8)
                 Text(utilizationStatus)
                     .font(.caption)
-                    .foregroundColor(utilizationColor)
+                    .foregroundStyle(utilizationColor)
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
@@ -787,7 +775,7 @@ struct FundCompositionChart: View {
             .frame(height: 200)
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -877,7 +865,7 @@ struct MemberSelector: View {
                             Image(systemName: "chevron.down")
                                 .font(.caption)
                         }
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(.ultraThinMaterial)
@@ -898,7 +886,7 @@ struct MemberSelector: View {
                             Image(systemName: "arrow.up.arrow.down")
                             Text(sortOption.rawValue)
                         }
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(.ultraThinMaterial)
@@ -910,7 +898,7 @@ struct MemberSelector: View {
                     // Member count
                     Text("\(filteredMembers.count) members")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -921,10 +909,10 @@ struct MemberSelector: View {
                 VStack {
                     Image(systemName: "person.slash")
                         .font(.largeTitle)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Text("No members match filter")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 200)
             } else {
@@ -943,23 +931,23 @@ struct MemberSelector: View {
                                         if member.phoneNumber != nil {
                                             Image(systemName: "message.fill")
                                                 .font(.caption)
-                                                .foregroundColor(.green)
+                                                .foregroundStyle(.green)
                                         }
                                     }
                                     
                                     HStack {
                                         Text(member.memberRole.displayName)
                                             .font(.caption)
-                                            .foregroundColor(.secondary)
+                                            .foregroundStyle(.secondary)
                                         
                                         if let lastSent = member.lastStatementSentDate {
                                             Text("• Last sent: \(DateHelper.formatShortDate(lastSent))")
                                                 .font(.caption)
-                                                .foregroundColor(.secondary)
+                                                .foregroundStyle(.secondary)
                                         } else {
                                             Text("• Never sent")
                                                 .font(.caption)
-                                                .foregroundColor(.orange)
+                                                .foregroundStyle(.orange)
                                         }
                                     }
                                 }
@@ -974,12 +962,12 @@ struct MemberSelector: View {
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
                                             .background(Color.red.opacity(0.2))
-                                            .foregroundColor(.red)
+                                            .foregroundStyle(.red)
                                             .clipShape(RoundedRectangle(cornerRadius: 4))
                                     }
                                     
                                     Image(systemName: "chevron.right")
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                         .font(.caption)
                                 }
                             }
@@ -993,7 +981,7 @@ struct MemberSelector: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1065,7 +1053,7 @@ struct LoanSummaryReport: View {
                 if filteredLoans.isEmpty {
                     Text("No loans found in selected period")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding()
                 } else {
@@ -1077,7 +1065,7 @@ struct LoanSummaryReport: View {
                                     .fontWeight(.medium)
                                 Text("Issued \(DateHelper.formatDate(loan.issueDate))")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                             
                             Spacer()
@@ -1089,12 +1077,12 @@ struct LoanSummaryReport: View {
                                 HStack(spacing: 4) {
                                     Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                     
                                     if loan.isOverdue {
                                         Image(systemName: "exclamationmark.triangle.fill")
                                             .font(.caption)
-                                            .foregroundColor(.red)
+                                            .foregroundStyle(.red)
                                     }
                                 }
                             }
@@ -1106,7 +1094,7 @@ struct LoanSummaryReport: View {
                 }
             }
             .padding()
-            .background(Color.secondary.opacity(0.1))
+            .background(.quaternary)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .padding()
@@ -1127,7 +1115,7 @@ struct MonthlyReport: View {
                 
                 Text("\(DateHelper.formatShortMonth(startDate)) - \(DateHelper.formatShortMonth(endDate))")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
@@ -1162,7 +1150,7 @@ struct ContributionAnalysisCard: View {
             if monthlyTotals.isEmpty {
                 Text("No contribution data available")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding()
             } else {
@@ -1180,18 +1168,18 @@ struct ContributionAnalysisCard: View {
                     let average = total / Double(max(1, monthlyTotals.count))
                     Text("Average: \(CurrencyFormatter.shared.format(average))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Spacer()
                     
                     Text("Last 6 months")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1220,7 +1208,7 @@ struct LoanActivityCard: View {
                         .fontWeight(.semibold)
                     Text("New Loans")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -1229,13 +1217,13 @@ struct LoanActivityCard: View {
                         .fontWeight(.semibold)
                     Text("Total Issued")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1255,7 +1243,7 @@ struct MemberActivityCard: View {
                         .fontWeight(.semibold)
                     Text("Active Members")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -1264,13 +1252,13 @@ struct MemberActivityCard: View {
                         .fontWeight(.semibold)
                     Text("With Active Loans")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1311,7 +1299,7 @@ struct FundGrowthChart: View {
             if fundGrowthData.isEmpty {
                 Text("No fund data available")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(height: 200)
                     .frame(maxWidth: .infinity)
                     .background(Color.secondary.opacity(0.05))
@@ -1345,7 +1333,7 @@ struct FundGrowthChart: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1377,7 +1365,7 @@ struct MemberDistributionChart: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1411,7 +1399,7 @@ struct LoanPerformanceMetrics: View {
                 HStack {
                     Text("Average Loan Amount")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(CurrencyFormatter.shared.format(averageLoanAmount))
                         .font(.subheadline)
@@ -1421,18 +1409,18 @@ struct LoanPerformanceMetrics: View {
                 HStack {
                     Text("Repayment Success Rate")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(String(format: "%.1f%%", repaymentRate * 100))
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .foregroundColor(repaymentRate > 0.8 ? .green : .orange)
+                        .foregroundStyle(repaymentRate > 0.8 ? .green : .orange)
                 }
                 
                 HStack {
                     Text("Active Loans")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text("\(dataManager.activeLoans.count)")
                         .font(.subheadline)
@@ -1441,7 +1429,7 @@ struct LoanPerformanceMetrics: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1458,7 +1446,7 @@ struct MemberInfoCard: View {
                         .fontWeight(.semibold)
                     Text(member.memberRole.displayName)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -1478,30 +1466,30 @@ struct MemberInfoCard: View {
             HStack(spacing: 16) {
                 HStack(spacing: 6) {
                     Image(systemName: member.phoneNumber != nil ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(member.phoneNumber != nil ? .green : .red)
+                        .foregroundStyle(member.phoneNumber != nil ? .green : .red)
                         .font(.caption)
                     Text("WhatsApp \(member.phoneNumber != nil ? "Available" : "No Phone")")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 if let lastStatementDate = member.lastStatementSentDate {
                     HStack(spacing: 6) {
                         Image(systemName: "paperplane.fill")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                             .font(.caption)
                         Text("Last sent: \(DateHelper.formatDate(lastStatementDate))")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 } else {
                     HStack(spacing: 6) {
                         Image(systemName: "paperplane")
-                            .foregroundColor(.orange)
+                            .foregroundStyle(.orange)
                             .font(.caption)
                         Text("No statements sent")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1511,7 +1499,7 @@ struct MemberInfoCard: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1524,7 +1512,7 @@ struct InfoItem: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text(value)
                 .font(.subheadline)
         }
@@ -1570,10 +1558,10 @@ struct MemberFinancialSummary: View {
                 Text(CurrencyFormatter.shared.format(netPosition))
                     .font(.title3)
                     .fontWeight(.semibold)
-                    .foregroundColor(netPosition >= 0 ? .green : .red)
+                    .foregroundStyle(netPosition >= 0 ? .green : .red)
             }
             .padding()
-            .background(Color.secondary.opacity(0.1))
+            .background(.quaternary)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
@@ -1589,7 +1577,7 @@ struct FinancialReportMetricCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
                 Spacer()
             }
             
@@ -1599,11 +1587,11 @@ struct FinancialReportMetricCard: View {
             
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1633,7 +1621,7 @@ struct MemberLoanHistory: View {
             if loans.isEmpty {
                 Text("No loans taken")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding()
             } else {
@@ -1646,7 +1634,7 @@ struct MemberLoanHistory: View {
                                     .fontWeight(.medium)
                                 Text("Issued \(DateHelper.formatDate(loan.issueDate))")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                             
                             Spacer()
@@ -1654,30 +1642,30 @@ struct MemberLoanHistory: View {
                             if loan.loanStatus == .completed {
                                 Label("Completed", systemImage: "checkmark.circle.fill")
                                     .font(.caption)
-                                    .foregroundColor(.green)
+                                    .foregroundStyle(.green)
                             } else if loan.isOverdue {
                                 Label("Overdue", systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption)
-                                    .foregroundColor(.red)
+                                    .foregroundStyle(.red)
                             } else {
                                 Label("Active", systemImage: "circle.fill")
                                     .font(.caption)
-                                    .foregroundColor(.blue)
+                                    .foregroundStyle(.blue)
                             }
                         }
                         
                         if loan.loanStatus == .active {
                             ProgressView(value: loan.completionPercentage, total: 100)
-                                .tint(loan.isOverdue ? .red : .accentColor)
+                                .tint(loan.isOverdue ? .red : Color.accentColor)
                             
                             HStack {
                                 Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Spacer()
                                 Text("\(Int(loan.completionPercentage))% paid")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -1688,7 +1676,7 @@ struct MemberLoanHistory: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1711,7 +1699,7 @@ struct MemberTransactionHistory: View {
             if transactions.isEmpty {
                 Text("No transactions found")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding()
             } else {
@@ -1722,7 +1710,7 @@ struct MemberTransactionHistory: View {
                                 .font(.subheadline)
                             Text(DateHelper.formatDate(transaction.transactionDate))
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         
                         Spacer()
@@ -1731,12 +1719,12 @@ struct MemberTransactionHistory: View {
                             Text(CurrencyFormatter.shared.format(abs(transaction.amount)))
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(transaction.transactionType.isCredit ? .green : .red)
+                                .foregroundStyle(transaction.transactionType.isCredit ? .green : .red)
                             
                             if let description = transaction.transactionDescription {
                                 Text(description)
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                     .lineLimit(1)
                             }
                         }
@@ -1750,7 +1738,7 @@ struct MemberTransactionHistory: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1770,7 +1758,7 @@ struct RecentActivitySection: View {
             if recentTransactions.isEmpty {
                 Text("No recent transactions")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding()
             } else {
@@ -1781,7 +1769,7 @@ struct RecentActivitySection: View {
                                 .font(.subheadline)
                             Text(DateHelper.formatDate(transaction.transactionDate))
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         
                         Spacer()
@@ -1789,7 +1777,7 @@ struct RecentActivitySection: View {
                         Text(CurrencyFormatter.shared.format(abs(transaction.amount)))
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundColor(transaction.amount > 0 ? .green : .red)
+                            .foregroundStyle(transaction.amount > 0 ? .green : .red)
                     }
                     .padding(.vertical, 4)
                     
@@ -1800,7 +1788,7 @@ struct RecentActivitySection: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -1821,8 +1809,8 @@ struct ReportTypeButton: View {
                     .foregroundStyle(iconColor)
 
                 Text(reportType.rawValue)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                    .foregroundColor(textColor)
+                    .font(.caption2)
+                    .foregroundStyle(textColor)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)

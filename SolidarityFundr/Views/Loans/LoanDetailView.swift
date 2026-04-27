@@ -114,7 +114,7 @@ struct LoanDetailView: View {
                         .fontWeight(.semibold)
                     Text(loan.member?.memberRole.displayName ?? "")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
@@ -136,21 +136,21 @@ struct LoanDetailView: View {
                     }
                 }
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
             
             // Progress
             if loan.loanStatus == .active {
                 VStack(spacing: 8) {
                     ProgressView(value: loan.completionPercentage, total: 100)
-                        .tint(loan.isOverdue ? .red : .accentColor)
+                        .tint(loan.isOverdue ? .red : Color.accentColor)
                         .scaleEffect(x: 1, y: 2)
                     
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Paid")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Text(CurrencyFormatter.shared.format(loan.amount - loan.balance))
                                 .font(.subheadline)
                                 .fontWeight(.medium)
@@ -164,7 +164,7 @@ struct LoanDetailView: View {
                                 .fontWeight(.semibold)
                             Text("Complete")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         
                         Spacer()
@@ -172,18 +172,18 @@ struct LoanDetailView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("Remaining")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Text(CurrencyFormatter.shared.format(loan.balance))
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(loan.balance > 0 ? .orange : .green)
+                                .foregroundStyle(loan.balance > 0 ? .orange : .green)
                         }
                     }
                 }
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
     }
@@ -316,7 +316,7 @@ struct LoanStatusBadge: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(backgroundColor)
-        .foregroundColor(foregroundColor)
+        .foregroundStyle(foregroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
@@ -397,7 +397,7 @@ struct LoanInfoCard: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -421,7 +421,7 @@ struct PaymentSummaryCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Next Payment Due")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text(DateHelper.formatDate(nextDue))
                             .font(.subheadline)
                             .fontWeight(.medium)
@@ -436,7 +436,7 @@ struct PaymentSummaryCard: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -451,11 +451,11 @@ struct NotesCard: View {
             
             Text(notes)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -472,7 +472,7 @@ struct PaymentScheduleRow: View {
                     .fontWeight(.medium)
                 Text(DateHelper.formatDate(payment.dueDate))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
@@ -483,11 +483,11 @@ struct PaymentScheduleRow: View {
                     .fontWeight(.medium)
                 Text("Principal: \(CurrencyFormatter.shared.formatDecimal(payment.principalPayment))")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             Image(systemName: isPaid ? "checkmark.circle.fill" : "circle")
-                .foregroundColor(isPaid ? .green : .secondary)
+                .foregroundStyle(isPaid ? .green : .secondary)
                 .font(.title3)
         }
         .padding()
@@ -513,7 +513,7 @@ struct PaymentHistoryRow: View {
                     }
                 }
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
             
             Spacer()
@@ -522,12 +522,12 @@ struct PaymentHistoryRow: View {
                 Text(CurrencyFormatter.shared.format(payment.amount))
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .foregroundColor(.green)
+                    .foregroundStyle(.green)
                 
                 if let notes = payment.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
@@ -546,11 +546,11 @@ struct InfoRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Spacer()
             Text(value)
                 .fontWeight(.medium)
-                .foregroundColor(valueColor)
+                .foregroundStyle(valueColor)
         }
         .font(.subheadline)
     }
@@ -582,7 +582,7 @@ struct EditLoanSheet: View {
                         TextField("0", text: $loanAmount)
                             .multilineTextAlignment(.trailing)
                         Text("KSH")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     // Balance
@@ -592,7 +592,7 @@ struct EditLoanSheet: View {
                         TextField("0", text: $loanBalance)
                             .multilineTextAlignment(.trailing)
                         Text("KSH")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     // Repayment Period
@@ -612,10 +612,10 @@ struct EditLoanSheet: View {
                     // Due Date (calculated)
                     HStack {
                         Text("Due Date")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(DateHelper.formatDate(calculateDueDate()))
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 
@@ -629,11 +629,11 @@ struct EditLoanSheet: View {
                         if loanStatus == .active && loan.loanStatus == .completed {
                             Text("Reactivating this loan will allow further payments and tracking")
                                 .font(.caption)
-                                .foregroundColor(.orange)
+                                .foregroundStyle(.orange)
                         } else if loanStatus == .completed && loan.balance > 0 {
                             Text("Warning: This loan still has a balance of \(CurrencyFormatter.shared.format(loan.balance))")
                                 .font(.caption)
-                                .foregroundColor(.red)
+                                .foregroundStyle(.red)
                         }
                     }
                 }
@@ -649,11 +649,11 @@ struct EditLoanSheet: View {
                     } label: {
                         Label("Recalculate Balance from Payments", systemImage: "arrow.clockwise")
                     }
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                     
                     Text("This will recalculate the balance based on all loan payments")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 // Current vs New Comparison
@@ -824,7 +824,7 @@ struct ComparisonRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             HStack {
                 Text(current)
@@ -833,12 +833,12 @@ struct ComparisonRow: View {
                 if hasChanged {
                     Image(systemName: "arrow.right")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Text(new)
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .foregroundColor(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }

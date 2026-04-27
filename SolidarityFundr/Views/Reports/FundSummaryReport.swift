@@ -62,15 +62,15 @@ struct FundSummaryReport: View {
             
             Text("Comprehensive overview of the Solidarity Fund for all members")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             Text("Report Date: \(Date().formatted(date: .complete, time: .omitted))")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
@@ -138,10 +138,10 @@ struct FundSummaryReport: View {
             
             if activeLoansData.isEmpty {
                 Text("No active loans")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.secondary.opacity(0.1))
+                    .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -164,7 +164,7 @@ struct FundSummaryReport: View {
                                     .fontWeight(.medium)
                                 Text("Original: \(CurrencyFormatter.shared.format(loan.amount))")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                             
                             Spacer()
@@ -172,10 +172,10 @@ struct FundSummaryReport: View {
                             VStack(alignment: .trailing, spacing: 4) {
                                 Text(CurrencyFormatter.shared.format(loan.balance))
                                     .fontWeight(.medium)
-                                    .foregroundColor(.orange)
+                                    .foregroundStyle(.orange)
                                 Text("Outstanding")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                         .padding(.horizontal)
@@ -218,7 +218,7 @@ struct FundSummaryReport: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .background(Color.secondary.opacity(0.1))
+            .background(.quaternary)
             
             // Member rows sorted by total contributions
             ScrollView {
@@ -267,11 +267,11 @@ struct FundSummaryReport: View {
                             Text(CurrencyFormatter.shared.format(member.totalContributions))
                                 .frame(width: 150, alignment: .trailing)
                                 .fontWeight(index < 3 ? .semibold : .regular)
-                                .foregroundColor(index == 0 ? .green : .primary)
+                                .foregroundStyle(index == 0 ? .green : .primary)
                             
                             Text(CurrencyFormatter.shared.format(member.totalActiveLoanBalance))
                                 .frame(width: 150, alignment: .trailing)
-                                .foregroundColor(member.hasActiveLoans ? .orange : .primary)
+                                .foregroundStyle(member.hasActiveLoans ? .orange : .primary)
                             
                             StatusBadge(status: member.memberStatus)
                                 .frame(width: 100)
@@ -375,21 +375,21 @@ private struct MetricCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
                     .font(.title3)
                 Spacer()
             }
             
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             Text(value)
                 .font(.title3)
                 .fontWeight(.semibold)
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }

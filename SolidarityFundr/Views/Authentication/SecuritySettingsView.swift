@@ -32,13 +32,13 @@ struct SecuritySettingsView: View {
                     
                     Text("Use \(authManager.biometricType.displayName) to quickly and securely access your fund data")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 } else {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundStyle(.orange)
                         Text("Biometric authentication not available")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .font(.caption)
                 }
@@ -53,7 +53,7 @@ struct SecuritySettingsView: View {
                     
                     Button(action: { showingRemovePIN = true }) {
                         Label("Remove PIN", systemImage: "lock.slash")
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                 } else {
                     Button(action: { showingPINSetup = true }) {
@@ -62,7 +62,7 @@ struct SecuritySettingsView: View {
                     
                     Text("A PIN provides an alternative way to authenticate when biometrics are unavailable")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -80,7 +80,7 @@ struct SecuritySettingsView: View {
                 
                 Text("Automatically lock the app after a period of inactivity")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             // Security Information
@@ -90,21 +90,21 @@ struct SecuritySettingsView: View {
                         .font(.subheadline)
                     Text("All sensitive data is encrypted using industry-standard encryption")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Label("Local Storage Only", systemImage: "internaldrive.fill")
                         .font(.subheadline)
                         .padding(.top, 5)
                     Text("Your financial data is stored securely on this device only")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Label("Biometric Protection", systemImage: "touchid")
                         .font(.subheadline)
                         .padding(.top, 5)
                     Text("Access is protected by your device's biometric authentication")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 5)
             }
@@ -157,7 +157,7 @@ struct PINSetupView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "lock.circle.fill")
                         .font(.system(size: 60))
-                        .foregroundColor(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                     
                     Text(step == 1 ? "Create PIN" : "Confirm PIN")
                         .font(.title2)
@@ -165,7 +165,7 @@ struct PINSetupView: View {
                     
                     Text(step == 1 ? "Enter a 4-6 digit PIN" : "Re-enter your PIN to confirm")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.top, 40)
                 
@@ -182,7 +182,7 @@ struct PINSetupView: View {
                 if !error.isEmpty {
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                         .transition(.opacity)
                 }
                 
@@ -230,7 +230,7 @@ struct PINSetupView: View {
                     Image(systemName: "delete.left.fill")
                         .font(.title2)
                         .frame(width: 60, height: 60)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                 }
             }
         }

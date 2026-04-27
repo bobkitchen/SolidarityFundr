@@ -94,63 +94,42 @@ struct PaymentsView: View {
     // MARK: - View Components
     
     private var paymentSummaryHeader: some View {
-        VStack(spacing: 12) {
-            // Title and primary actions are now in .navigationTitle / .toolbar.
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Financial Records")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                Text(Date().formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
-                    .foregroundColor(Color.secondary.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
-            
-            HStack(spacing: 20) {
-                SummaryCard(
+        VStack(spacing: 8) {
+            HStack(spacing: 16) {
+                MiniMetricCard(
                     title: "Total Payments",
                     value: viewModel.formatCurrency(viewModel.paymentSummary.totalAmount),
-                    icon: "dollarsign.circle.fill",
-                    color: .green
+                    systemImage: "dollarsign.circle.fill",
+                    tint: .green
                 )
-                
-                SummaryCard(
+                MiniMetricCard(
                     title: "Contributions",
                     value: viewModel.formatCurrency(viewModel.paymentSummary.totalContributions),
-                    icon: "banknote.fill",
-                    color: .blue
+                    systemImage: "banknote.fill",
+                    tint: .blue
                 )
-                
-                SummaryCard(
+                MiniMetricCard(
                     title: "Loan Repayments",
                     value: viewModel.formatCurrency(viewModel.paymentSummary.totalLoanRepayments),
-                    icon: "creditcard.fill",
-                    color: .orange
+                    systemImage: "creditcard.fill",
+                    tint: .orange
                 )
             }
-            .padding(.horizontal)
-            
-            HStack {
+
+            HStack(spacing: 16) {
                 Label("\(viewModel.paymentSummary.paymentCount) payments", systemImage: "number.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
                 if viewModel.paymentSummary.paymentCount > 0 {
-                    Label("Avg: \(viewModel.formatCurrency(viewModel.paymentSummary.averagePayment))", systemImage: "chart.line.uptrend.xyaxis")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Label("Avg \(viewModel.formatCurrency(viewModel.paymentSummary.averagePayment))",
+                          systemImage: "chart.line.uptrend.xyaxis")
                 }
+                Spacer()
             }
-            .padding(.horizontal)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .padding(.vertical)
-        .background(Color.secondary.opacity(0.1))
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
     
     private var dateRangeFilter: some View {
@@ -196,7 +175,7 @@ struct PaymentsView: View {
                     )
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 
@@ -218,7 +197,7 @@ struct PaymentsView: View {
                     )
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(.quaternary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 }
@@ -339,7 +318,7 @@ struct PaymentRowView: View {
                             Text(payment.paymentMethodType.displayName)
                                 .font(.caption)
                         }
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     }
                     
                     Spacer()
@@ -348,10 +327,10 @@ struct PaymentRowView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(CurrencyFormatter.shared.format(payment.amount))
                             .font(.headline)
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                         Text(DateHelper.formatDate(payment.paymentDate))
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 
@@ -364,7 +343,7 @@ struct PaymentRowView: View {
                             Text("Loan: \(CurrencyFormatter.shared.format(payment.loanRepaymentAmount))")
                                 .font(.caption)
                         }
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                         
                         HStack(spacing: 4) {
                             Image(systemName: "banknote.fill")
@@ -372,7 +351,7 @@ struct PaymentRowView: View {
                             Text("Contribution: \(CurrencyFormatter.shared.format(payment.contributionAmount))")
                                 .font(.caption)
                         }
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                         
                         Spacer()
                     }
@@ -382,7 +361,7 @@ struct PaymentRowView: View {
                 if let notes = payment.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -416,7 +395,7 @@ struct SummaryCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .foregroundStyle(color)
                     .font(.title3)
                 Spacer()
             }
@@ -427,11 +406,11 @@ struct SummaryCard: View {
             
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.1))
+        .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
