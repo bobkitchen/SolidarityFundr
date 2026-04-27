@@ -675,9 +675,9 @@ struct DataSyncSettingsView: View {
                     }
                     
                     Button {
-                        syncManager.forceSyncNow()
+                        syncManager.saveAndSurfaceState()
                     } label: {
-                        Label("Sync Now", systemImage: "arrow.clockwise")
+                        Label("Save Local Changes", systemImage: "arrow.clockwise")
                     }
                     .disabled(syncManager.syncStatus == .syncing || !syncManager.isOnline)
                     

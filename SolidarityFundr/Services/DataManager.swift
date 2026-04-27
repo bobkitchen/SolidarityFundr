@@ -122,10 +122,53 @@ class DataManager: ObservableObject {
         guard !member.hasActiveLoans else {
             throw DataManagerError.memberHasActiveLoans
         }
-        
+
+        // CloudKit doesn't support Cascade delete rules — relationships are
+        // Nullify. Walk the member's owned graph and delete dependents
+        // explicitly so they don't become orphans on iCloud.
+        deleteRelatedRecords(for: member)
+
         context.delete(member)
         saveContext()
         fetchMembers()
+    }
+
+    /// Walks every record that previously cascaded from a Member and deletes
+    /// it explicitly. Safe to call before `context.delete(member)` —
+    /// Nullify-rule relationships will otherwise leave these records as
+    /// orphans (no member, but still in CloudKit).
+    private func deleteRelatedRecords(for member: Member) {
+        if let loans = member.loans as? Set<Loan> {
+            for loan in loans {
+                if let payments = loan.payments as? Set<Payment> {
+                    for payment in payments {
+                        if let txn = payment.transaction {
+                            context.delete(txn)
+                        }
+                        context.delete(payment)
+                    }
+                }
+                context.delete(loan)
+            }
+        }
+        if let payments = member.payments as? Set<Payment> {
+            for payment in payments {
+                if let txn = payment.transaction {
+                    context.delete(txn)
+                }
+                context.delete(payment)
+            }
+        }
+        if let transactions = member.transactions as? Set<Transaction> {
+            for transaction in transactions {
+                context.delete(transaction)
+            }
+        }
+        if let notifications = member.notificationHistory as? Set<NotificationHistory> {
+            for note in notifications {
+                context.delete(note)
+            }
+        }
     }
     
     func deleteTestUsers() {

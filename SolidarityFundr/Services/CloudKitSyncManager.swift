@@ -2,7 +2,10 @@
 //  CloudKitSyncManager.swift
 //  SolidarityFundr
 //
-//  Created on 7/20/25.
+//  Observes NSPersistentCloudKitContainer events and surfaces sync state
+//  to the UI. Does NOT attempt to "force sync" — CloudKit propagates
+//  changes via silent push automatically; there is no public API on
+//  NSPersistentCloudKitContainer to trigger an on-demand fetch.
 //
 
 import Foundation
@@ -14,81 +17,59 @@ import Network
 @MainActor
 class CloudKitSyncManager: ObservableObject {
     static let shared = CloudKitSyncManager()
-    
+
     @Published var syncStatus: SyncStatus = .idle
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
     @Published var isOnline: Bool = true
-    
+    @Published var setupErrorDescription: String?
+
+    let containerIdentifier = "iCloud.com.bobk.SolidarityFundr"
+
     private let container: NSPersistentCloudKitContainer
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "NetworkMonitor")
-    private var syncTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
-    
+
     enum SyncStatus: Equatable {
         case idle
         case syncing
         case success
         case error(String)
-        
+
         var displayText: String {
             switch self {
-            case .idle:
-                return "Ready"
-            case .syncing:
-                return "Syncing..."
-            case .success:
-                return "Synced"
-            case .error(let message):
-                return "Error: \(message)"
-            }
-        }
-        
-        static func == (lhs: SyncStatus, rhs: SyncStatus) -> Bool {
-            switch (lhs, rhs) {
-            case (.idle, .idle), (.syncing, .syncing), (.success, .success):
-                return true
-            case (.error(let lhsMessage), .error(let rhsMessage)):
-                return lhsMessage == rhsMessage
-            default:
-                return false
+            case .idle: return "Ready"
+            case .syncing: return "Syncing…"
+            case .success: return "Synced"
+            case .error(let message): return "Error: \(message)"
             }
         }
     }
-    
+
     private init() {
         self.container = PersistenceController.shared.container
         setupNetworkMonitoring()
         setupCloudKitEventMonitoring()
-        startBackgroundSync()
     }
-    
+
     deinit {
-        Task { @MainActor in
-            stopBackgroundSync()
-        }
         networkMonitor.cancel()
     }
-    
+
     // MARK: - Network Monitoring
-    
+
     private func setupNetworkMonitoring() {
         networkMonitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async {
                 self?.isOnline = path.status == .satisfied
-                if path.status == .satisfied {
-                    Task {
-                        await self?.triggerSync()
-                    }
-                }
             }
         }
         networkMonitor.start(queue: networkQueue)
     }
-    
+
     // MARK: - CloudKit Event Monitoring
-    
+
     private func setupCloudKitEventMonitoring() {
         NotificationCenter.default.publisher(for: NSPersistentCloudKitContainer.eventChangedNotification)
             .receive(on: DispatchQueue.main)
@@ -97,22 +78,24 @@ class CloudKitSyncManager: ObservableObject {
             }
             .store(in: &cancellables)
     }
-    
+
     private func handleCloudKitEvent(_ notification: Notification) {
         guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey] as? NSPersistentCloudKitContainer.Event else {
             return
         }
-        
+
         switch event.type {
         case .setup:
             if event.succeeded {
                 syncStatus = .success
+                setupErrorDescription = nil
             } else {
                 let errorMessage = event.error?.localizedDescription ?? "Setup failed"
                 syncStatus = .error(errorMessage)
                 syncError = errorMessage
+                setupErrorDescription = errorMessage
             }
-            
+
         case .import:
             if event.succeeded {
                 lastSyncDate = Date()
@@ -122,7 +105,7 @@ class CloudKitSyncManager: ObservableObject {
                 syncStatus = .error(errorMessage)
                 syncError = errorMessage
             }
-            
+
         case .export:
             if event.succeeded {
                 lastSyncDate = Date()
@@ -132,109 +115,97 @@ class CloudKitSyncManager: ObservableObject {
                 syncStatus = .error(errorMessage)
                 syncError = errorMessage
             }
-            
+
         @unknown default:
             break
         }
     }
-    
-    // MARK: - Background Sync
-    
-    private func startBackgroundSync() {
-        // Sync every 3 minutes when app is active
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.triggerSync()
-            }
-        }
-        
-        // Initial sync
-        Task { @MainActor in
-            await triggerSync()
-        }
-    }
-    
-    private func stopBackgroundSync() {
-        syncTimer?.invalidate()
-        syncTimer = nil
-    }
-    
-    func triggerSync() async {
-        guard isOnline else {
-            return
-        }
-        
-        guard syncStatus != .syncing else {
-            return
-        }
-        
-        await MainActor.run {
-            syncStatus = .syncing
-            syncError = nil
-        }
-        
-        do {
-            // Trigger CloudKit sync by saving the context
-            let context = container.viewContext
-            if context.hasChanges {
-                try context.save()
-            }
-            
-            // Force a remote sync check by accessing the coordinator
-            _ = container.persistentStoreCoordinator
-            
-        } catch {
-            let errorMessage = error.localizedDescription
-            
-            await MainActor.run {
-                syncStatus = .error(errorMessage)
-                syncError = errorMessage
-            }
-        }
-    }
-    
+
     // MARK: - Manual Actions
-    
-    func forceSyncNow() {
-        Task { @MainActor in
-            await triggerSync()
+
+    /// Surfaces the current state. There is no public API to force a
+    /// CloudKit fetch on `NSPersistentCloudKitContainer` — the system
+    /// propagates remote changes automatically via silent push. This
+    /// method just saves any pending local changes (which DataManager
+    /// also does on every mutation, so the call is mostly cosmetic).
+    func saveAndSurfaceState() {
+        guard isOnline else {
+            syncStatus = .error("Offline")
+            return
+        }
+
+        let context = container.viewContext
+        if context.hasChanges {
+            do {
+                try context.save()
+            } catch {
+                syncStatus = .error(error.localizedDescription)
+                syncError = error.localizedDescription
+                return
+            }
+        }
+        // If the last event was a successful import/export, leave state alone.
+        if case .error = syncStatus {
+            // Keep the existing error visible until cleared.
+        } else {
+            syncStatus = .success
         }
     }
-    
+
     func clearSyncError() {
         syncError = nil
         if case .error = syncStatus {
             syncStatus = .idle
         }
     }
-    
+
     // MARK: - CloudKit Account Status
-    
+
     func checkCloudKitStatus() async -> CKAccountStatus {
         do {
-            let container = CKContainer(identifier: "iCloud.com.bobk.SolidarityFundr")
+            let container = CKContainer(identifier: containerIdentifier)
             return try await container.accountStatus()
         } catch {
             return .couldNotDetermine
         }
     }
-    
+
     func getCloudKitStatusMessage() async -> String {
         let status = await checkCloudKitStatus()
-        
         switch status {
-        case .available:
-            return "CloudKit Available"
-        case .noAccount:
-            return "No iCloud Account"
-        case .restricted:
-            return "iCloud Restricted"
-        case .couldNotDetermine:
-            return "CloudKit Status Unknown"
-        case .temporarilyUnavailable:
-            return "CloudKit Temporarily Unavailable"
-        @unknown default:
-            return "Unknown CloudKit Status"
+        case .available: return "CloudKit Available"
+        case .noAccount: return "No iCloud Account"
+        case .restricted: return "iCloud Restricted"
+        case .couldNotDetermine: return "CloudKit Status Unknown"
+        case .temporarilyUnavailable: return "CloudKit Temporarily Unavailable"
+        @unknown default: return "Unknown CloudKit Status"
+        }
+    }
+
+    /// One-shot diagnostic snapshot — useful for "Copy Diagnostic Info" in
+    /// the Settings sync panel.
+    func diagnosticSummary(accountStatus: CKAccountStatus) -> String {
+        let lines: [String] = [
+            "CloudKit Diagnostic — \(Date().formatted(date: .abbreviated, time: .standard))",
+            "Container: \(containerIdentifier)",
+            "Account: \(accountStatusName(accountStatus))",
+            "Online: \(isOnline ? "yes" : "no")",
+            "Status: \(syncStatus.displayText)",
+            "Last sync: \(lastSyncDate?.formatted(date: .abbreviated, time: .standard) ?? "never")",
+            setupErrorDescription.map { "Setup error: \($0)" } ?? "Setup error: none",
+            syncError.map { "Last error: \($0)" } ?? "Last error: none",
+        ]
+        return lines.joined(separator: "\n")
+    }
+
+    private func accountStatusName(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .available: return "available"
+        case .noAccount: return "no account"
+        case .restricted: return "restricted"
+        case .couldNotDetermine: return "unknown"
+        case .temporarilyUnavailable: return "temporarily unavailable"
+        @unknown default: return "unknown"
         }
     }
 }

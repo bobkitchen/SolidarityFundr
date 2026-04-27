@@ -6,6 +6,12 @@
 //
 
 import SwiftUI
+import CloudKit
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 struct CloudKitStatusView: View {
     @StateObject private var syncManager = CloudKitSyncManager.shared
@@ -29,8 +35,8 @@ struct CloudKitStatusView: View {
             }
             
             if case .error = syncManager.syncStatus {
-                Button("Retry") {
-                    syncManager.forceSyncNow()
+                Button("Details") {
+                    showingDetails = true
                 }
                 .font(.caption)
                 .buttonStyle(.borderless)
@@ -41,11 +47,7 @@ struct CloudKitStatusView: View {
         .background(syncStatusColor.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .onTapGesture {
-            if case .idle = syncManager.syncStatus {
-                syncManager.forceSyncNow()
-            } else {
-                showingDetails = true
-            }
+            showingDetails = true
         }
         .popover(isPresented: $showingDetails) {
             CloudKitDetailsView()
@@ -115,20 +117,28 @@ struct CloudKitDetailsView: View {
     @StateObject private var syncManager = CloudKitSyncManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var cloudKitStatus = "Checking..."
-    
+    @State private var accountStatus: CKAccountStatus = .couldNotDetermine
+    @State private var copiedDiagnostic = false
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 // CloudKit Account Status
                 GroupBox("iCloud Account") {
-                    HStack {
-                        Image(systemName: "person.icloud")
-                            .foregroundStyle(.blue)
-                        Text(cloudKitStatus)
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "person.icloud")
+                                .foregroundStyle(.blue)
+                            Text(cloudKitStatus)
+                            Spacer()
+                        }
+                        Text("Container: \(syncManager.containerIdentifier)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
-                
+
                 // Sync Status
                 GroupBox("Sync Status") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -137,13 +147,13 @@ struct CloudKitDetailsView: View {
                                 .foregroundStyle(syncManager.isOnline ? .green : .red)
                             Text(syncManager.isOnline ? "Online" : "Offline")
                         }
-                        
+
                         HStack {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .foregroundStyle(.blue)
                             Text("Status: \(syncManager.syncStatus.displayText)")
                         }
-                        
+
                         if let lastSync = syncManager.lastSyncDate {
                             HStack {
                                 Image(systemName: "clock")
@@ -153,15 +163,26 @@ struct CloudKitDetailsView: View {
                         }
                     }
                 }
-                
-                // Error Details
+
+                // Setup Error (separate from per-event errors — surfaces store-load failure)
+                if let setupError = syncManager.setupErrorDescription {
+                    GroupBox("Setup Error") {
+                        Text(setupError)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                // Last Event Error
                 if let error = syncManager.syncError {
-                    GroupBox("Error Details") {
+                    GroupBox("Last Sync Error") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(error)
                                 .foregroundStyle(.red)
                                 .font(.caption)
-                            
+                                .textSelection(.enabled)
+
                             Button("Clear Error") {
                                 syncManager.clearSyncError()
                             }
@@ -169,28 +190,33 @@ struct CloudKitDetailsView: View {
                         }
                     }
                 }
-                
+
                 // Manual Actions
                 GroupBox("Actions") {
                     VStack(spacing: 8) {
-                        Button("Sync Now") {
-                            syncManager.forceSyncNow()
-                            dismiss()
+                        Button("Save Local Changes") {
+                            syncManager.saveAndSurfaceState()
                         }
                         .frame(maxWidth: .infinity)
                         .buttonStyle(.borderedProminent)
-                        
-                        Text("The app automatically syncs every 3 minutes when online.")
-                            .font(.caption)
+
+                        Button(copiedDiagnostic ? "Copied!" : "Copy Diagnostic Info") {
+                            copyDiagnostic()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.bordered)
+
+                        Text("CloudKit propagates remote changes automatically via silent push — there's no public API to force a fetch.")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
                 }
-                
+
                 Spacer()
             }
             .padding()
-            .frame(width: 300, height: 400)
+            .frame(width: 340, height: 520)
             .navigationTitle("CloudKit Sync")
             #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -205,6 +231,22 @@ struct CloudKitDetailsView: View {
         }
         .task {
             cloudKitStatus = await syncManager.getCloudKitStatusMessage()
+            accountStatus = await syncManager.checkCloudKitStatus()
+        }
+    }
+
+    private func copyDiagnostic() {
+        let text = syncManager.diagnosticSummary(accountStatus: accountStatus)
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #else
+        UIPasteboard.general.string = text
+        #endif
+        copiedDiagnostic = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            await MainActor.run { copiedDiagnostic = false }
         }
     }
 }

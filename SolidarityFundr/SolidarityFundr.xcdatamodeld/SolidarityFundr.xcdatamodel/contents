@@ -32,7 +32,7 @@
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="wasOverridden" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <relationship name="member" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Member" inverseName="loans" inverseEntity="Member"/>
-        <relationship name="payments" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Payment" inverseName="loan" inverseEntity="Payment"/>
+        <relationship name="payments" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Payment" inverseName="loan" inverseEntity="Payment"/>
     </entity>
     <entity name="Member" representedClassName="Member" syncable="YES" codeGenerationType="class">
         <attribute name="cashOutAmount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
@@ -55,9 +55,9 @@
         <attribute name="totalContributions" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="loans" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Loan" inverseName="member" inverseEntity="Loan"/>
-        <relationship name="notificationHistory" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="NotificationHistory" inverseName="member" inverseEntity="NotificationHistory"/>
-        <relationship name="payments" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Payment" inverseName="member" inverseEntity="Payment"/>
-        <relationship name="transactions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Transaction" inverseName="member" inverseEntity="Transaction"/>
+        <relationship name="notificationHistory" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="NotificationHistory" inverseName="member" inverseEntity="NotificationHistory"/>
+        <relationship name="payments" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Payment" inverseName="member" inverseEntity="Payment"/>
+        <relationship name="transactions" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Transaction" inverseName="member" inverseEntity="Transaction"/>
     </entity>
     <entity name="Payment" representedClassName="Payment" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
@@ -72,7 +72,7 @@
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="loan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Loan" inverseName="payments" inverseEntity="Loan"/>
         <relationship name="member" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Member" inverseName="payments" inverseEntity="Member"/>
-        <relationship name="transaction" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="Transaction" inverseName="payment" inverseEntity="Transaction"/>
+        <relationship name="transaction" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Transaction" inverseName="payment" inverseEntity="Transaction"/>
     </entity>
     <entity name="Transaction" representedClassName="Transaction" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
