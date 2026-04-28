@@ -48,6 +48,9 @@ struct LoanSnapshot {
     let dueDate: Date?
     let isOverdue: Bool
     let wasOverridden: Bool
+    let lastPaymentDate: Date?
+    let lastPaymentAmount: Double
+    let paymentCount: Int
 
     init(loan: Loan) {
         self.memberName = loan.member?.name ?? "Unknown"
@@ -58,6 +61,19 @@ struct LoanSnapshot {
         self.dueDate = loan.dueDate
         self.isOverdue = loan.isOverdue
         self.wasOverridden = loan.wasOverridden
+
+        // Snapshot the latest payment on this loan so the PDF can show
+        // "Last paid KSH X on Y" without touching Core Data later.
+        let payments = (loan.payments as? Set<Payment>) ?? []
+        let sorted = payments
+            .compactMap { p -> (Date, Double)? in
+                guard let d = p.paymentDate else { return nil }
+                return (d, p.amount)
+            }
+            .sorted { $0.0 > $1.0 }
+        self.paymentCount = sorted.count
+        self.lastPaymentDate = sorted.first?.0
+        self.lastPaymentAmount = sorted.first?.1 ?? 0
     }
 }
 
@@ -869,7 +885,23 @@ class PDFGenerator {
         let percentText = String(format: "%.0f%%", percentage)
         percentText.draw(at: CGPoint(x: progressX + progressWidth + 5, y: point.y - 2), withAttributes: percentAttributes)
 
-        return point.y - 14  // Single line layout
+        // Sub-line: last payment status. Indented under the loan line so
+        // each member's repayment cadence is visible at a glance on the
+        // monthly send.
+        let subAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8),
+            .foregroundColor: NSColor.darkGray
+        ]
+        let subText: String
+        if let lastDate = loan.lastPaymentDate {
+            let dateStr = DateFormatter.shortDate.string(from: lastDate)
+            subText = "Last paid: \(CurrencyFormatter.shared.format(loan.lastPaymentAmount)) on \(dateStr)  •  \(loan.paymentCount) payment\(loan.paymentCount == 1 ? "" : "s") to date"
+        } else {
+            subText = "No payments recorded yet"
+        }
+        subText.draw(at: CGPoint(x: point.x + 10, y: point.y - 14), withAttributes: subAttrs)
+
+        return point.y - 26  // Original loan line + one sub-line
     }
 
     private func drawMemberSummaryTable(activeMembers: [MemberSnapshot], in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
