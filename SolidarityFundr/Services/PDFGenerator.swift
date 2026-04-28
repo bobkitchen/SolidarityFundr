@@ -402,29 +402,50 @@ final class PDFGenerator {
             kCGPDFContextKeywords as String: "Solidarity Fund, Parachichi House, Monthly Statement"
         ]
 
-        return try renderPDF(pageRect: pageRect, auxiliary: auxiliary, fileNameStem: "ParachichiHouse_Statement_\(s.month.fileNameLabel)") { rect in
-            var y = rect.height - 50
-            y = drawHeader(in: rect, at: y, subtitle: "Statement for \(s.month.displayName)")
-            y -= 18
-            y = drawHeroBand(in: rect, at: y, snapshot: s)
-            y -= 22
+        let subtitle = "Statement for \(s.month.displayName)"
+        return try renderPDF(
+            pageRect: pageRect,
+            auxiliary: auxiliary,
+            fileNameStem: "ParachichiHouse_Statement_\(s.month.fileNameLabel)",
+            footerLabel: subtitle,
+            fullHeader: { ctx in
+                let y = self.drawHeader(in: ctx.pageRect, at: ctx.topY, subtitle: subtitle)
+                return y - 18
+            },
+            continuationHeader: { ctx in
+                self.drawContinuationHeader(in: ctx.pageRect, at: ctx.topY, subtitle: subtitle)
+            }
+        ) { ctx in
+            // Top sections always fit on page 1: header was already drawn,
+            // hero / spotlights / this-month / member-list are bounded by the
+            // member roster, which for the foreseeable fund size leaves room
+            // for the loan section. If it ever doesn't, ensureSpace will
+            // overflow each loan card to a continuation page.
+            ctx.currentY = drawHeroBand(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
+            ctx.currentY -= 22
 
             if !s.spotlights.isEmpty {
-                y = drawSpotlightRow(in: rect, at: y, awards: s.spotlights)
-                y -= 14
+                ctx.currentY = drawSpotlightRow(in: ctx.pageRect, at: ctx.currentY, awards: s.spotlights)
+                ctx.currentY -= 14
             }
 
-            y = drawThisMonthStrip(in: rect, at: y, snapshot: s)
-            y -= 18
+            ctx.currentY = drawThisMonthStrip(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
+            ctx.currentY -= 18
 
-            y = drawMemberReferenceList(in: rect, at: y, snapshot: s)
+            ctx.currentY = drawMemberReferenceList(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
 
             if !s.activeLoans.isEmpty {
-                y -= 18
-                y = drawLoanProgressSection(in: rect, at: y, loans: s.activeLoans)
+                // Section header + at least one card must fit; otherwise
+                // start the loan section on page 2.
+                ctx.ensureSpace(26 + 56)
+                ctx.currentY -= 18
+                ctx.currentY = drawLoanProgressHeader(in: ctx.pageRect, at: ctx.currentY)
+                for loan in s.activeLoans {
+                    ctx.ensureSpace(50)
+                    drawLoanProgressCard(in: ctx.pageRect, at: ctx.currentY, loan: loan)
+                    ctx.currentY -= 56
+                }
             }
-
-            drawFooter(in: rect, label: "Statement for \(s.month.displayName)")
         }
     }
 
@@ -495,8 +516,9 @@ final class PDFGenerator {
         let spacing: CGFloat = 14
         let count = max(awards.count, 1)
         let cardWidth = (availableWidth - spacing * CGFloat(count - 1)) / CGFloat(count)
-        // v4 has at most 2 awards, so cards can be taller and roomier.
-        let cardHeight: CGFloat = 120
+        // 100pt fits a comfortable 5-member, 3-loan layout on one page;
+        // pagination catches anything larger.
+        let cardHeight: CGFloat = 100
 
         var x = leftMargin
         for award in awards {
@@ -531,46 +553,47 @@ final class PDFGenerator {
         NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).stroke()
         cg?.restoreGState()
 
-        // Eyebrow: emoji + category label
+        // Layout (top → bottom inside a 100pt card):
+        //   eyebrow (10pt) — 14pt down from top
+        //   member name (16pt) — anchored at minY+52
+        //   primary value (22pt) — anchored at minY+22
+        //   detail (10pt) — anchored at minY+8
         let eyebrowAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.darkGray,
             .kern: 0.8
         ]
         let eyebrow = "\(award.category.emoji)  \(award.category.title.uppercased())"
-        eyebrow.draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 24), withAttributes: eyebrowAttrs)
+        eyebrow.draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 22), withAttributes: eyebrowAttrs)
 
-        // Member name (centered horizontally)
         let nameAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
         let nameSize = award.memberName.size(withAttributes: nameAttrs)
         award.memberName.draw(
-            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 64),
+            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 52),
             withAttributes: nameAttrs
         )
 
-        // Primary value
         let valueAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 22, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 20, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
         let valueSize = award.primaryValue.size(withAttributes: valueAttrs)
         award.primaryValue.draw(
-            at: CGPoint(x: rect.midX - valueSize.width / 2, y: rect.minY + 30),
+            at: CGPoint(x: rect.midX - valueSize.width / 2, y: rect.minY + 24),
             withAttributes: valueAttrs
         )
 
-        // Detail line
         if let detail = award.detail {
             let detailAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 10),
+                .font: NSFont.systemFont(ofSize: 9),
                 .foregroundColor: NSColor.darkGray
             ]
             let detailSize = detail.size(withAttributes: detailAttrs)
             detail.draw(
-                at: CGPoint(x: rect.midX - detailSize.width / 2, y: rect.minY + 12),
+                at: CGPoint(x: rect.midX - detailSize.width / 2, y: rect.minY + 8),
                 withAttributes: detailAttrs
             )
         }
@@ -587,7 +610,7 @@ final class PDFGenerator {
         var y = yIn
         let leftMargin: CGFloat = 40
         let contentWidth = pageRect.width - leftMargin * 2
-        let stripHeight: CGFloat = 56
+        let stripHeight: CGFloat = 50
 
         // Card background — light avocado tint to read as "team" not "individual"
         let cg = NSGraphicsContext.current?.cgContext
@@ -610,7 +633,7 @@ final class PDFGenerator {
             .foregroundColor: NSColor.darkGray,
             .kern: 0.8
         ]
-        "THIS MONTH".draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 18), withAttributes: eyebrowAttrs)
+        "THIS MONTH".draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 16), withAttributes: eyebrowAttrs)
 
         // Two lines, two stats each, separated by a middle dot.
         let lineAttrs: [NSAttributedString.Key: Any] = [
@@ -622,8 +645,8 @@ final class PDFGenerator {
         let memberWord = m.contributingMembersCount == 1 ? "member" : "members"
         let loanWord = m.newLoansCount == 1 ? "new loan" : "new loans"
         let line2 = "\(m.contributingMembersCount) \(memberWord) contributed   ·   \(m.newLoansCount) \(loanWord)"
-        line1.draw(at: CGPoint(x: rect.minX + 14, y: rect.minY + 22), withAttributes: lineAttrs)
-        line2.draw(at: CGPoint(x: rect.minX + 14, y: rect.minY + 6), withAttributes: lineAttrs)
+        line1.draw(at: CGPoint(x: rect.minX + 14, y: rect.minY + 18), withAttributes: lineAttrs)
+        line2.draw(at: CGPoint(x: rect.minX + 14, y: rect.minY + 4), withAttributes: lineAttrs)
 
         return y - stripHeight
     }
@@ -694,12 +717,12 @@ final class PDFGenerator {
             cg?.saveGState()
             cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.15).cgColor)
             cg?.setLineWidth(0.5)
-            cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 18))
-            cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 18))
+            cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 16))
+            cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 16))
             cg?.strokePath()
             cg?.restoreGState()
 
-            y -= 22
+            y -= 18
         }
 
         // Legend — once, small, aligned right.
@@ -718,23 +741,17 @@ final class PDFGenerator {
 
     // MARK: Monthly — Loan Repayment Progress
 
-    private func drawLoanProgressSection(in pageRect: CGRect, at yIn: CGFloat,
-                                         loans: [MonthlyStatementSnapshot.LoanRow]) -> CGFloat {
-        var y = yIn
+    /// Draws the section heading only. Loan cards are drawn one at a
+    /// time by the caller so the layout context can paginate between
+    /// them.
+    private func drawLoanProgressHeader(in pageRect: CGRect, at yIn: CGFloat) -> CGFloat {
         let leftMargin: CGFloat = 40
-
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        "💪  Loan Repayment Progress".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
-        y -= 26
-
-        for loan in loans {
-            drawLoanProgressCard(in: pageRect, at: y, loan: loan)
-            y -= 64
-        }
-        return y
+        "💪  Loan Repayment Progress".draw(at: CGPoint(x: leftMargin, y: yIn - 14), withAttributes: titleAttrs)
+        return yIn - 26
     }
 
     private func drawLoanProgressCard(in pageRect: CGRect, at yTop: CGFloat,
@@ -808,7 +825,7 @@ final class PDFGenerator {
             return "Next: \(CurrencyFormatter.shared.format(loan.monthlyPayment)) due \(DateFormatter.fullDate.string(from: due))"
         }()
         let subText = nextPart.isEmpty ? remainingPart : "\(remainingPart)   ·   \(nextPart)"
-        subText.draw(at: CGPoint(x: leftMargin, y: yTop - 50), withAttributes: subAttrs)
+        subText.draw(at: CGPoint(x: leftMargin, y: yTop - 46), withAttributes: subAttrs)
     }
 
     // MARK: Rendering — Member Statement
@@ -824,34 +841,141 @@ final class PDFGenerator {
         ]
         let safeName = s.memberName.replacingOccurrences(of: " ", with: "-")
 
-        return try renderPDF(pageRect: pageRect, auxiliary: auxiliary, fileNameStem: "ParachichiHouse_\(safeName)_\(s.month.fileNameLabel)") { rect in
-            var y = rect.height - 50
-            y = drawHeader(in: rect, at: y, subtitle: "Statement for \(s.month.displayName)")
-            y -= 8
-            y = drawMemberHeading(in: rect, at: y, snapshot: s)
-            y -= 14
-            y = drawOpeningClosing(in: rect, at: y, snapshot: s)
-            y -= 16
+        let subtitle = "Statement for \(s.month.displayName)"
+        return try renderPDF(
+            pageRect: pageRect,
+            auxiliary: auxiliary,
+            fileNameStem: "ParachichiHouse_\(safeName)_\(s.month.fileNameLabel)",
+            footerLabel: "\(s.memberName) — \(s.month.displayName)",
+            fullHeader: { ctx in
+                let y = self.drawHeader(in: ctx.pageRect, at: ctx.topY, subtitle: subtitle)
+                return y - 8
+            },
+            continuationHeader: { ctx in
+                self.drawContinuationHeader(in: ctx.pageRect, at: ctx.topY, subtitle: "\(s.memberName) — \(s.month.displayName)")
+            }
+        ) { ctx in
+            ctx.currentY = drawMemberHeading(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
+            ctx.currentY -= 14
+            ctx.currentY = drawOpeningClosing(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
+            ctx.currentY -= 16
 
-            y = drawSection(title: "Activity in \(s.month.displayName)", in: rect, at: y)
-            y = drawMemberEntriesTable(in: rect, at: y, entries: s.entries)
+            ctx.ensureSpace(40)
+            ctx.currentY = drawSection(title: "Activity in \(s.month.displayName)", in: ctx.pageRect, at: ctx.currentY)
+            ctx.currentY = drawMemberEntriesTable(in: ctx.pageRect, at: ctx.currentY, entries: s.entries)
 
             if !s.activeLoans.isEmpty {
-                y -= 16
-                y = drawSection(title: "Outstanding Obligations", in: rect, at: y)
-                _ = drawActiveLoanFooter(in: rect, at: y, loans: s.activeLoans)
+                ctx.ensureSpace(40 + CGFloat(s.activeLoans.count) * 16)
+                ctx.currentY -= 16
+                ctx.currentY = drawSection(title: "Outstanding Obligations", in: ctx.pageRect, at: ctx.currentY)
+                ctx.currentY = drawActiveLoanFooter(in: ctx.pageRect, at: ctx.currentY, loans: s.activeLoans)
             }
-
-            drawFooter(in: rect, label: "\(s.memberName) — \(s.month.displayName)")
         }
     }
 
     // MARK: PDF context plumbing
 
+    /// Page-level layout state passed into render bodies. Tracks
+    /// `currentY` as the body draws sections, and lets the body request
+    /// a new page when the next section won't fit. Also handles
+    /// per-page footer drawing with "Page X" numbering.
+    final class PageLayout {
+        let pageRect: CGRect
+        let cg: CGContext
+        let footerLabel: String
+        let bottomReserve: CGFloat = 50  // footer + small margin above it
+        let topY: CGFloat
+        var currentY: CGFloat
+        private(set) var pageNumber: Int = 0
+        private var pageOpen = false
+
+        // Set by the caller before calling `beginPage` for the first
+        // time. Returns the y-coordinate immediately below the header.
+        var fullHeaderDrawer: ((PageLayout) -> CGFloat)?
+        var continuationHeaderDrawer: ((PageLayout) -> CGFloat)?
+
+        init(pageRect: CGRect, cg: CGContext, footerLabel: String) {
+            self.pageRect = pageRect
+            self.cg = cg
+            self.footerLabel = footerLabel
+            self.topY = pageRect.height - 50
+            self.currentY = pageRect.height - 50
+        }
+
+        /// Open a new PDF page. The first call uses the full header;
+        /// subsequent calls use the compact continuation header.
+        func beginPage() {
+            if pageOpen { endPage() }
+            cg.beginPDFPage([:] as CFDictionary)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: false)
+            pageNumber += 1
+            currentY = topY
+            pageOpen = true
+
+            if pageNumber == 1, let drawer = fullHeaderDrawer {
+                currentY = drawer(self)
+            } else if pageNumber > 1, let drawer = continuationHeaderDrawer {
+                currentY = drawer(self)
+            }
+        }
+
+        /// Close the current page after drawing the footer.
+        func endPage() {
+            guard pageOpen else { return }
+            drawFooter()
+            NSGraphicsContext.restoreGraphicsState()
+            cg.endPDFPage()
+            pageOpen = false
+        }
+
+        /// If `needed` points won't fit before the bottom reserve, open
+        /// a new page (with continuation header).
+        func ensureSpace(_ needed: CGFloat) {
+            if currentY - needed < bottomReserve {
+                beginPage()  // closes prior page, opens new one
+            }
+        }
+
+        private func drawFooter() {
+            let cgCtx = NSGraphicsContext.current?.cgContext
+            cgCtx?.saveGState()
+            cgCtx?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.25).cgColor)
+            cgCtx?.setLineWidth(0.5)
+            cgCtx?.move(to: CGPoint(x: 40, y: 35))
+            cgCtx?.addLine(to: CGPoint(x: pageRect.width - 40, y: 35))
+            cgCtx?.strokePath()
+            cgCtx?.restoreGState()
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.darkGray
+            ]
+            footerLabel.draw(at: CGPoint(x: 40, y: 20), withAttributes: attrs)
+
+            let pageText = "Page \(pageNumber)"
+            let pageSize = pageText.size(withAttributes: attrs)
+            pageText.draw(
+                at: CGPoint(x: pageRect.width / 2 - pageSize.width / 2, y: 20),
+                withAttributes: attrs
+            )
+
+            let right = "Parachichi House Solidarity Fund"
+            let rightSize = right.size(withAttributes: attrs)
+            right.draw(
+                at: CGPoint(x: pageRect.width - 40 - rightSize.width, y: 20),
+                withAttributes: attrs
+            )
+        }
+    }
+
     private func renderPDF(pageRect: CGRect,
                            auxiliary: [String: Any],
                            fileNameStem: String,
-                           body: (CGRect) -> Void) throws -> URL {
+                           footerLabel: String,
+                           fullHeader: @escaping (PageLayout) -> CGFloat,
+                           continuationHeader: @escaping (PageLayout) -> CGFloat,
+                           body: (PageLayout) -> Void) throws -> URL {
         let data = NSMutableData()
         var mediaBox = pageRect
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
@@ -859,14 +983,14 @@ final class PDFGenerator {
             throw PDFError.contextCreationFailed
         }
 
-        cg.beginPDFPage([:] as CFDictionary)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: false)
+        let layout = PageLayout(pageRect: pageRect, cg: cg, footerLabel: footerLabel)
+        layout.fullHeaderDrawer = fullHeader
+        layout.continuationHeaderDrawer = continuationHeader
 
-        body(pageRect)
+        layout.beginPage()
+        body(layout)
+        layout.endPage()
 
-        NSGraphicsContext.restoreGraphicsState()
-        cg.endPDFPage()
         cg.closePDF()
 
         let url = FileManager.default.temporaryDirectory
@@ -932,25 +1056,27 @@ final class PDFGenerator {
         return y
     }
 
-    private func drawFooter(in pageRect: CGRect, label: String) {
+    /// Compact header for continuation pages — single line + thin
+    /// rule, no logo block. Returns y-coordinate immediately below it.
+    @discardableResult
+    private func drawContinuationHeader(in pageRect: CGRect, at yPosition: CGFloat, subtitle: String) -> CGFloat {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        let line = "Parachichi House — Solidarity Fund   ·   \(subtitle) (continued)"
+        line.draw(at: CGPoint(x: 40, y: yPosition - 14), withAttributes: attrs)
+
         let cg = NSGraphicsContext.current?.cgContext
         cg?.saveGState()
-        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.25).cgColor)
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.30).cgColor)
         cg?.setLineWidth(0.5)
-        cg?.move(to: CGPoint(x: 40, y: 35))
-        cg?.addLine(to: CGPoint(x: pageRect.width - 40, y: 35))
+        cg?.move(to: CGPoint(x: 40, y: yPosition - 22))
+        cg?.addLine(to: CGPoint(x: pageRect.width - 40, y: yPosition - 22))
         cg?.strokePath()
         cg?.restoreGState()
 
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9),
-            .foregroundColor: NSColor.darkGray
-        ]
-        label.draw(at: CGPoint(x: 40, y: 20), withAttributes: attrs)
-
-        let right = "Parachichi House Solidarity Fund"
-        let rightSize = right.size(withAttributes: attrs)
-        right.draw(at: CGPoint(x: pageRect.width - 40 - rightSize.width, y: 20), withAttributes: attrs)
+        return yPosition - 32
     }
 
     /// Avocado-green disc with monogram — stand-in for the logo asset
