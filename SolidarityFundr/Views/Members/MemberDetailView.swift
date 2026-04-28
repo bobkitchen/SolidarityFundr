@@ -13,38 +13,43 @@ struct MemberDetailView: View {
     @StateObject private var viewModel = MemberViewModel()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openLoanWindow) private var openLoanWindow
-    @State private var selectedTab = 0
+    @State private var selectedTab: DetailTab = .overview
     @State private var showingEditSheet = false
     @State private var showingCashOutConfirmation = false
     @State private var showingNewLoan = false
     @State private var showingNewPayment = false
-    @State private var refreshID = UUID()
-    
+
+    /// Pre-fill values for the loan-creation sheet, set by the eligibility
+    /// card's "Issue Loan with these terms" button.
+    @State private var newLoanPrefillAmount: Double?
+    @State private var newLoanPrefillMonths: Int?
+
+    enum DetailTab: String, CaseIterable, Hashable {
+        case overview = "Overview"
+        case contributions = "Contributions"
+        case loans = "Loans"
+        case transactions = "Transactions"
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                // Header Card
                 memberHeaderCard
-                
-                // Quick Actions
                 quickActionsCard
-                
-                // Tab Selection
+
                 Picker("View", selection: $selectedTab) {
-                    Text("Overview").tag(0)
-                    Text("Contributions").tag(1)
-                    Text("Loans").tag(2)
-                    Text("Transactions").tag(3)
+                    ForEach(DetailTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
-                
-                // Tab Content
+
                 tabContent
             }
             .padding(.vertical)
         }
-        .navigationTitle("Member Details")
+        .navigationTitle(member.name ?? "Member Details")
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Menu {
@@ -53,9 +58,9 @@ struct MemberDetailView: View {
                     } label: {
                         Label("Edit Member", systemImage: "pencil")
                     }
-                    
+
                     Divider()
-                    
+
                     if member.memberStatus == .active {
                         Button {
                             viewModel.suspendMember(member)
@@ -69,7 +74,7 @@ struct MemberDetailView: View {
                             Label("Reactivate Member", systemImage: "play.circle")
                         }
                     }
-                    
+
                     if member.memberStatus != .active && !member.hasActiveLoans {
                         Button {
                             showingCashOutConfirmation = true
@@ -77,7 +82,7 @@ struct MemberDetailView: View {
                             Label("Cash Out", systemImage: "banknote")
                         }
                     }
-                    
+
                     if viewModel.canDeleteMember(member) {
                         Divider()
                         Button(role: .destructive) {
@@ -94,8 +99,15 @@ struct MemberDetailView: View {
         .sheet(isPresented: $showingEditSheet) {
             EditMemberSheet(member: member, viewModel: viewModel)
         }
-        .sheet(isPresented: $showingNewLoan) {
-            MemberNewLoanSheet(preselectedMember: member)
+        .sheet(isPresented: $showingNewLoan, onDismiss: {
+            newLoanPrefillAmount = nil
+            newLoanPrefillMonths = nil
+        }) {
+            NewLoanSheet(
+                preselectedMember: member,
+                preselectedAmount: newLoanPrefillAmount,
+                preselectedMonths: newLoanPrefillMonths
+            )
         }
         .sheet(isPresented: $showingNewPayment) {
             PaymentFormView(
@@ -121,81 +133,51 @@ struct MemberDetailView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .memberDataUpdated)) { notification in
-            if let updatedMember = notification.object as? Member,
-               updatedMember.objectID == member.objectID {
-                // Force refresh when this member's data is updated
-                refreshID = UUID()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .paymentSaved)) { _ in
-            // Force refresh when any payment is saved
-            refreshID = UUID()
-        }
-        .id(refreshID)
+        // No refreshID hack: @ObservedObject member already publishes
+        // changes for KVO-backed Core Data properties, and the eligibility
+        // card observes DataManager directly, so adding a payment elsewhere
+        // updates this view without manual invalidation.
     }
-    
+
     // MARK: - View Components
-    
+
+    /// Identity-only header. Financial summary and contribution counts
+    /// live in the Overview tab so they're not duplicated.
     private var memberHeaderCard: some View {
-        VStack(spacing: 16) {
-            // Member Avatar — deterministic per-member tint
+        VStack(spacing: 12) {
             Image(systemName: "person.crop.circle.fill")
                 .resizable()
                 .frame(width: 64, height: 64)
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(BrandColor.avatarTint(for: member.name))
                 .accessibilityHidden(true)
-            
-            // Member Info
-            VStack(spacing: 8) {
-                Text(member.name ?? "Unknown")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
-                HStack {
-                    Label(member.memberRole.displayName, systemImage: "briefcase.fill")
-                    
-                    if member.memberStatus != .active {
-                        Text("•")
-                        StatusBadge(status: member.memberStatus)
-                    }
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                
-                if let joinDate = member.joinDate {
-                    Text("Member since \(DateHelper.formatDate(joinDate))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+            Text(member.name ?? "Unknown")
+                .font(.title2.weight(.semibold))
+
+            HStack(spacing: 8) {
+                Label(member.memberRole.displayName, systemImage: "briefcase.fill")
+                    .labelStyle(.titleAndIcon)
+                if member.memberStatus != .active {
+                    Text("•")
+                    StatusBadge(status: member.memberStatus)
                 }
             }
-            
-            // Key Statistics
-            HStack(spacing: 30) {
-                StatisticItem(
-                    value: CurrencyFormatter.shared.format(member.totalContributions),
-                    label: "Total Contributions"
-                )
-                
-                StatisticItem(
-                    value: "\(member.monthsAsMember)",
-                    label: "Months Active"
-                )
-                
-                StatisticItem(
-                    value: CurrencyFormatter.shared.format(member.totalActiveLoanBalance),
-                    label: "Active Loans"
-                )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+            if let joinDate = member.joinDate {
+                Text("Member since \(DateHelper.formatDate(joinDate))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding()
         .frame(maxWidth: .infinity)
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding()
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
     }
-    
+
     private var quickActionsCard: some View {
         HStack(spacing: 12) {
             if member.isEligibleForLoan {
@@ -204,24 +186,18 @@ struct MemberDetailView: View {
                     icon: "creditcard.fill",
                     color: .blue
                 ) {
+                    newLoanPrefillAmount = nil
+                    newLoanPrefillMonths = nil
                     showingNewLoan = true
                 }
             }
-            
+
             QuickActionButton(
                 title: "Make Payment",
                 icon: "dollarsign.circle.fill",
                 color: .green
             ) {
                 showingNewPayment = true
-            }
-            
-            QuickActionButton(
-                title: "Export Report",
-                icon: "doc.text.fill",
-                color: .purple
-            ) {
-                // TODO: Implement export
             }
         }
         .padding(.horizontal)
@@ -230,16 +206,10 @@ struct MemberDetailView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
-        case 0:
-            overviewTab
-        case 1:
-            contributionsTab
-        case 2:
-            loansTab
-        case 3:
-            transactionsTab
-        default:
-            EmptyView()
+        case .overview:      overviewTab
+        case .contributions: contributionsTab
+        case .loans:         loansTab
+        case .transactions:  transactionsTab
         }
     }
     
@@ -247,16 +217,17 @@ struct MemberDetailView: View {
     
     private var overviewTab: some View {
         VStack(spacing: 16) {
-            // Contact Information
             if member.email != nil || member.phoneNumber != nil {
                 ContactInfoCard(member: member)
             }
-            
-            // Financial Summary
+
             FinancialSummaryCard(member: member)
-            
-            // Loan Eligibility
-            LoanEligibilityCard(member: member)
+
+            LoanEligibilityCard(member: member) { amount, months in
+                newLoanPrefillAmount = amount
+                newLoanPrefillMonths = months
+                showingNewLoan = true
+            }
         }
         .padding(.horizontal)
     }
@@ -328,23 +299,6 @@ struct MemberDetailView: View {
 }
 
 // MARK: - Supporting Views
-
-struct StatisticItem: View {
-    let value: String
-    let label: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
 
 struct QuickActionButton: View {
     let title: String
@@ -445,6 +399,11 @@ struct FinancialSummaryCard: View {
 /// elsewhere updates the numbers next time you land on this page.
 struct LoanEligibilityCard: View {
     let member: Member
+    /// Called when the admin taps "Issue Loan with these terms" — the
+    /// parent view (MemberDetailView) opens the loan-creation sheet
+    /// pre-filled with `(amount, months)`. Optional so the card can also
+    /// be used as a read-only summary elsewhere.
+    var onIssueLoan: ((Double, Int) -> Void)? = nil
     @EnvironmentObject private var dataManager: DataManager
 
     @State private var proposedAmount: Double = 0
@@ -464,29 +423,27 @@ struct LoanEligibilityCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 14) {
+                if let eligibility {
+                    if eligibility.isEligible {
+                        eligibleBody(eligibility)
+                    } else {
+                        blockedBody(eligibility)
+                    }
+                } else {
+                    Text("Fund settings unavailable.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } label: {
             HStack {
                 Text("Loan Eligibility")
-                    .font(.headline)
                 Spacer()
                 eligibilityBadge
             }
-
-            if let eligibility {
-                if eligibility.isEligible {
-                    eligibleBody(eligibility)
-                } else {
-                    blockedBody(eligibility)
-                }
-            } else {
-                Text("Fund settings unavailable.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
         }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
         .onAppear { initialiseIfNeeded() }
         .onChange(of: member.objectID) { _, _ in
             didInitialise = false
@@ -596,6 +553,21 @@ struct LoanEligibilityCard: View {
                         .font(.caption)
                 }
             }
+        }
+
+        // Issue Loan with these terms — only present if the parent gave
+        // us a callback. Pre-fills the loan-creation sheet so the admin
+        // doesn't re-enter what they just dialled in.
+        if let onIssueLoan, let preview = e.preview, preview.amount > 0 {
+            Button {
+                onIssueLoan(preview.amount, preview.months)
+            } label: {
+                Label("Issue Loan with these terms", systemImage: "creditcard.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .padding(.top, 4)
         }
     }
 
@@ -1043,19 +1015,6 @@ struct EditMemberSheet: View {
             return 19000
         case .securityGuard, .partTime:
             return 10000
-        }
-    }
-}
-
-// MARK: - Placeholder Views
-
-struct MemberNewLoanSheet: View {
-    let preselectedMember: Member?
-    
-    var body: some View {
-        NavigationStack {
-            Text("New Loan Form - To be implemented")
-                .navigationTitle("New Loan")
         }
     }
 }

@@ -299,7 +299,22 @@ struct NewLoanSheet: View {
     @StateObject private var viewModel = LoanViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTab = 0
-    
+
+    /// Optional pre-fill — set when the sheet is opened from the member
+    /// detail page's loan calculator, so the admin doesn't have to re-pick
+    /// the member or re-type the amount they just dialled in.
+    private let preselectedMember: Member?
+    private let preselectedAmount: Double?
+    private let preselectedMonths: Int?
+
+    init(preselectedMember: Member? = nil,
+         preselectedAmount: Double? = nil,
+         preselectedMonths: Int? = nil) {
+        self.preselectedMember = preselectedMember
+        self.preselectedAmount = preselectedAmount
+        self.preselectedMonths = preselectedMonths
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -522,7 +537,25 @@ struct NewLoanSheet: View {
             } message: {
                 Text(viewModel.errorMessage ?? "An error occurred while creating the loan")
             }
+            .onAppear { applyPreselection() }
         }
+    }
+
+    /// If the sheet was opened from a member's loan calculator, hydrate
+    /// the form with those values so the admin can review and confirm
+    /// instead of re-entering them.
+    private func applyPreselection() {
+        if let member = preselectedMember {
+            viewModel.selectedMember = member
+            if let firstAllowed = member.allowedRepaymentMonths.first {
+                viewModel.repaymentMonths = preselectedMonths ?? firstAllowed
+            }
+        }
+        if let amount = preselectedAmount, amount > 0 {
+            // LoanViewModel.loanAmount is a String — match its formatting.
+            viewModel.loanAmount = String(Int(amount.rounded()))
+        }
+        viewModel.calculateLoanDetails()
     }
 }
 
