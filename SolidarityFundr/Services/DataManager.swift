@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreData
+import CloudKit
 import Combine
 import os.log
 
@@ -27,6 +28,10 @@ class DataManager: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     private var isSaving = false
+    /// Set during the reconcileLedger pass so the contextDidSave observer
+    /// doesn't run `createMissingTransactions` mid-rebuild and double up
+    /// every payment. The previous reconcile run hit exactly this bug.
+    private var isReconciling = false
     
     private init() {
         self.persistenceController = PersistenceController.shared
@@ -48,9 +53,29 @@ class DataManager: ObservableObject {
     }
     
     private func setupObservers() {
-        NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)
+        // Filter to the main viewContext only, and dispatch the handler
+        // back to the main thread. The previous version observed every
+        // managed-object context (including the AuditLogger's background
+        // context) which caused two real crashes:
+        //
+        //   - AuditLogger writes from `bgContext.perform`. Saving fired
+        //     contextDidSave, the observer ran fetchInitialData on the
+        //     background thread, mutating @Published `members` from
+        //     off-main → SwiftUI's main-menu code asserted and beachballed.
+        //   - During reconcileLedger, the observer fired between the
+        //     delete-all-transactions save and the rebuild, calling
+        //     createMissingTransactions which silently re-created every
+        //     payment-linked transaction → duplicates → corrupted balance.
+        //
+        // The viewContext filter + main-thread dispatch + isReconciling
+        // gate together close those gaps.
+        let viewContext = persistenceController.container.viewContext
+        NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: viewContext)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self = self, !self.isSaving else { return }
+                guard let self = self,
+                      !self.isSaving,
+                      !self.isReconciling else { return }
                 self.fetchInitialData()
             }
             .store(in: &cancellables)
@@ -1004,6 +1029,13 @@ class DataManager: ObservableObject {
 
     @discardableResult
     func reconcileLedger() throws -> LedgerReconciliationReport {
+        // Suppress the contextDidSave observer for the duration of the
+        // reconcile. Without this, the save-after-delete fires
+        // createMissingTransactions and every Payment gets a phantom
+        // transaction created underneath the rebuild.
+        isReconciling = true
+        defer { isReconciling = false }
+
         let oldBalance = FundCalculator.shared.calculateFundBalance()
         let oldBobRemaining = fundSettings?.bobRemainingInvestment ?? 0
 
@@ -1234,6 +1266,103 @@ class DataManager: ObservableObject {
 
         return report
     }
+
+    // MARK: - Reset Local & iCloud Data
+    //
+    // The "Reset All Data" button in Settings only wipes the local
+    // store. With CloudKit enabled, the cloud's copy of the now-deleted
+    // records syncs straight back down within seconds — so the reset
+    // doesn't stick. To recover from a corrupted state, the cloud has
+    // to be wiped first.
+    //
+    // `resetAllDataIncludingCloud` does that:
+    //   1. Deletes every record zone in the app's private CloudKit
+    //      database (excluding `_defaultZone`, which is system-managed
+    //      and cannot be removed). Core Data's CloudKit mirror lives in
+    //      a zone called `com.apple.coredata.cloudkit.zone`; deleting
+    //      it equals "wipe everything for this app in iCloud" without
+    //      touching the user's iCloud session.
+    //   2. Wipes the local Core Data store via the existing empty-JSON
+    //      import path.
+    //   3. Resets fund settings to defaults.
+    //
+    // After this returns, the user can import a JSON backup and the
+    // freshly populated local data will sync cleanly up to a now-empty
+    // iCloud.
+
+    struct CloudResetReport {
+        let zonesDeleted: Int
+        let zoneIdentifiers: [String]
+    }
+
+    @MainActor
+    func resetAllDataIncludingCloud() async throws -> CloudResetReport {
+        // Pause the contextDidSave observer so deletes don't trigger
+        // fetch loops mid-operation.
+        isReconciling = true
+        defer { isReconciling = false }
+
+        // 1. Delete every non-default CloudKit zone in the private DB.
+        let container = CKContainer(identifier: CloudKitSyncManager.shared.containerIdentifier)
+        let database = container.privateCloudDatabase
+
+        let zones: [CKRecordZone]
+        do {
+            zones = try await database.allRecordZones()
+        } catch let error as CKError where error.code == .notAuthenticated {
+            throw DataManagerError.cloudKitNotAuthenticated
+        }
+
+        let defaultZoneID = CKRecordZone.ID(zoneName: CKRecordZone.ID.defaultZoneName)
+        let zoneIDsToDelete = zones
+            .map { $0.zoneID }
+            .filter { $0 != defaultZoneID }
+
+        var deletedCount = 0
+        var deletedNames: [String] = []
+        if !zoneIDsToDelete.isEmpty {
+            let result = try await database.modifyRecordZones(
+                saving: [],
+                deleting: zoneIDsToDelete
+            )
+            for (zoneID, deleteResult) in result.deleteResults {
+                switch deleteResult {
+                case .success:
+                    deletedCount += 1
+                    deletedNames.append(zoneID.zoneName)
+                case .failure(let error):
+                    // Log but don't fail the whole operation — partial
+                    // success is still progress.
+                    print("⚠️ Failed to delete zone \(zoneID.zoneName): \(error)")
+                }
+            }
+        }
+
+        // 2. Briefly pause so the cloud-side deletions get acknowledged
+        // before we churn the local store. Not strictly necessary, but
+        // makes the order of writes-up-to-iCloud more predictable on
+        // the next sync round-trip.
+        try await Task.sleep(for: .seconds(1))
+
+        // 3. Wipe local data (same recipe as the existing "Reset All Data"
+        // path in SettingsView).
+        try DataImportExport.shared.importData(from: Data("{}".utf8))
+        setupFundSettings()
+        fetchMembers()
+        fetchActiveLoans()
+        fetchAllLoans()
+        fetchRecentTransactions()
+
+        AuditLogger.shared.log(
+            event: .settingsChanged,
+            details: "Local + iCloud data reset. Zones removed: \(deletedNames.joined(separator: ", "))"
+        )
+
+        return CloudResetReport(
+            zonesDeleted: deletedCount,
+            zoneIdentifiers: deletedNames
+        )
+    }
 }
 
 extension OSLog {
@@ -1248,7 +1377,8 @@ enum DataManagerError: LocalizedError {
     case loanAmountExceedsLimit
     case cannotCashOutActiveMember
     case insufficientFunds
-    
+    case cloudKitNotAuthenticated
+
     var errorDescription: String? {
         switch self {
         case .memberHasActiveLoans:
@@ -1261,6 +1391,8 @@ enum DataManagerError: LocalizedError {
             return "Cannot cash out an active member."
         case .insufficientFunds:
             return "Insufficient funds in the solidarity fund."
+        case .cloudKitNotAuthenticated:
+            return "Not signed in to iCloud. Sign in to your Apple ID and try again."
         }
     }
 }

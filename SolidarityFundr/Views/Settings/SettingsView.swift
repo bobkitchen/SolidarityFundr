@@ -336,6 +336,10 @@ struct DataSyncSettingsView: View {
     @State private var showingReconcileConfirmation = false
     @State private var showingReconcileResult = false
     @State private var reconcileResultMessage = ""
+    @State private var showingCloudResetConfirmation = false
+    @State private var showingCloudResetResult = false
+    @State private var cloudResetResultMessage = ""
+    @State private var isResettingCloud = false
 
     var body: some View {
         // iCloud Sync — surfaces state. NSPersistentCloudKitContainer
@@ -434,6 +438,21 @@ struct DataSyncSettingsView: View {
             } label: {
                 Label("Reset All Data", systemImage: "trash")
             }
+
+            Button(role: .destructive) {
+                showingCloudResetConfirmation = true
+            } label: {
+                if isResettingCloud {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Resetting iCloud…")
+                    }
+                } else {
+                    Label("Reset Local & iCloud Data", systemImage: "icloud.slash")
+                }
+            }
+            .disabled(isResettingCloud)
+            .help("Wipes the app's data on this Mac AND in iCloud. Use this when 'Reset All Data' alone keeps re-syncing the bad state from iCloud.")
         } header: {
             Text("Maintenance")
         } footer: {
@@ -463,6 +482,23 @@ struct DataSyncSettingsView: View {
             Button("OK") {}
         } message: {
             Text(reconcileResultMessage)
+        }
+        .confirmationDialog(
+            "Reset local AND iCloud data?",
+            isPresented: $showingCloudResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Everything", role: .destructive) {
+                runCloudReset()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Wipes every record in this app's iCloud zone AND deletes all local data. After this completes, import your JSON backup. iCloud will then receive the clean state from this Mac and propagate it to your other devices. You'll need a current backup file on disk before starting.")
+        }
+        .alert("Reset complete", isPresented: $showingCloudResetResult) {
+            Button("OK") {}
+        } message: {
+            Text(cloudResetResultMessage)
         }
     }
     
@@ -496,6 +532,34 @@ struct DataSyncSettingsView: View {
             formatter.dateStyle = .short
             formatter.timeStyle = .short
             return formatter.string(from: date)
+        }
+    }
+
+    private func runCloudReset() {
+        isResettingCloud = true
+        Task {
+            do {
+                let report = try await dataManager.resetAllDataIncludingCloud()
+                await MainActor.run {
+                    isResettingCloud = false
+                    let zoneList = report.zoneIdentifiers.isEmpty
+                        ? "(no zones existed)"
+                        : report.zoneIdentifiers.joined(separator: ", ")
+                    cloudResetResultMessage = """
+                    Local data wiped.
+                    \(report.zonesDeleted) iCloud zone\(report.zonesDeleted == 1 ? "" : "s") deleted: \(zoneList).
+
+                    Now: tap Import Data and choose your JSON backup. The clean state will sync up to iCloud and across to your other devices.
+                    """
+                    showingCloudResetResult = true
+                }
+            } catch {
+                await MainActor.run {
+                    isResettingCloud = false
+                    cloudResetResultMessage = "Reset failed: \(error.localizedDescription)"
+                    showingCloudResetResult = true
+                }
+            }
         }
     }
 
