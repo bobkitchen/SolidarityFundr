@@ -2,1252 +2,884 @@
 //  PDFGenerator.swift
 //  SolidarityFundr
 //
-//  Created on 7/19/25.
+//  PDF generation for the two reports the fund actually ships:
 //
-
-// PDF report generation is a macOS-only admin feature. The drawing
-// pipeline depends throughout on AppKit (NSGraphicsContext, NSImage,
-// NSFont, NSBezierPath, etc.). The iPhone target shows a "Reports
-// are available on Mac" placeholder rather than carrying a parallel
-// UIKit drawing stack.
+//    1. Monthly Statement — period-bounded, fund-wide compiled
+//       statement: header + as-of metrics + active loans + member
+//       summary table.
+//
+//    2. Member Statement — period-bounded, single-member statement:
+//       header + opening/closing balances + chronological activity.
+//
+//  PDF drawing depends on AppKit (NSGraphicsContext, NSFont, NSImage,
+//  NSBezierPath) so this whole file is macOS-only. iPhone shows a
+//  placeholder in ReportsView rather than carrying a UIKit drawing
+//  stack.
+//
 
 #if os(macOS)
 
 import Foundation
 import PDFKit
-import SwiftUI
-import CoreGraphics
 import AppKit
+import CoreData
 
-// MARK: - Thread-Safe Data Snapshots
-// These plain structs capture Core Data values on the main thread
-// so PDF drawing can safely happen on a background thread.
+// MARK: - Snapshots (main-thread captures, drawn from background safely)
 
-struct MemberSnapshot {
-    let name: String
-    let role: String
-    let status: String
-    let joinDate: Date?
+struct MonthlyStatementSnapshot {
+    let month: StatementMonth
+    let fundBalance: Double
     let totalContributions: Double
-    let totalActiveLoanBalance: Double
-    let availableContributions: Double
-    let maximumLoanAmount: Double
-    let memberID: UUID?
+    let totalOutstandingLoans: Double
+    let activeMembersCount: Int
+    let memberRows: [MemberRow]
+    let activeLoans: [LoanRow]
 
-    init(member: Member) {
-        self.name = member.name ?? "Unknown"
-        self.role = member.memberRole.displayName
-        self.status = member.memberStatus.rawValue.capitalized
-        self.joinDate = member.joinDate
-        self.totalContributions = member.totalContributions
-        self.totalActiveLoanBalance = member.totalActiveLoanBalance
-        self.availableContributions = member.availableContributions
-        self.maximumLoanAmount = member.maximumLoanAmount
-        self.memberID = member.memberID
+    struct MemberRow {
+        let name: String
+        let role: String
+        let contributions: Double
+        let loanBalance: Double
+        let monthlyPayment: Double
+    }
+
+    struct LoanRow {
+        let memberName: String
+        let originalAmount: Double
+        let balance: Double
+        let monthlyPayment: Double
+        let issueDate: Date?
+        let dueDate: Date?
     }
 }
 
-struct LoanSnapshot {
+struct MemberStatementSnapshot {
+    let month: StatementMonth
     let memberName: String
-    let memberID: UUID?
-    let amount: Double
-    let balance: Double
-    let issueDate: Date?
-    let dueDate: Date?
-    let isOverdue: Bool
-    let wasOverridden: Bool
-    let lastPaymentDate: Date?
-    let lastPaymentAmount: Double
-    let paymentCount: Int
+    let memberRole: String
+    let joinDate: Date?
 
-    init(loan: Loan) {
-        self.memberName = loan.member?.name ?? "Unknown"
-        self.memberID = loan.member?.memberID
-        self.amount = loan.amount
-        self.balance = loan.balance
-        self.issueDate = loan.issueDate
-        self.dueDate = loan.dueDate
-        self.isOverdue = loan.isOverdue
-        self.wasOverridden = loan.wasOverridden
+    let openingContributions: Double
+    let closingContributions: Double
+    let openingLoanBalance: Double
+    let closingLoanBalance: Double
 
-        // Snapshot the latest payment on this loan so the PDF can show
-        // "Last paid KSH X on Y" without touching Core Data later.
-        let payments = (loan.payments as? Set<Payment>) ?? []
-        let sorted = payments
-            .compactMap { p -> (Date, Double)? in
-                guard let d = p.paymentDate else { return nil }
-                return (d, p.amount)
-            }
-            .sorted { $0.0 > $1.0 }
-        self.paymentCount = sorted.count
-        self.lastPaymentDate = sorted.first?.0
-        self.lastPaymentAmount = sorted.first?.1 ?? 0
+    let entries: [Entry]
+    let activeLoans: [ActiveLoan]
+
+    struct Entry {
+        let date: Date
+        let kind: String     // "Contribution" / "Loan Repayment" / "Loan Disbursed"
+        let detail: String
+        let signedAmount: Double  // + into fund, - out of fund (from member's perspective)
+    }
+
+    struct ActiveLoan {
+        let originalAmount: Double
+        let balance: Double
+        let monthlyPayment: Double
+        let nextDueDate: Date?
     }
 }
 
-struct MonthlyReportData {
-    let newMembersCount: Int
-    let totalContributions: Double
-    let loansIssuedCount: Int
-    let totalLoansIssued: Double
+// MARK: - PDF errors
+
+enum PDFError: LocalizedError {
+    case contextCreationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .contextCreationFailed: return "Failed to create PDF graphics context"
+        }
+    }
 }
 
-struct AnalyticsData {
-    let averageLoanAmount: Double
-    let repaymentRate: Double
-    let fundSummary: FundSummary
-    let membersByRole: [(role: String, count: Int)]
-    let activeLoansCount: Int
-}
+// MARK: - Generator
 
-/// All the data needed to draw a PDF, captured on the main thread.
-struct PDFReportData {
-    let type: ReportsView.ReportType
-    let startDate: Date
-    let endDate: Date
-    let fundSummary: FundSummary
-    let activeMembers: [MemberSnapshot]
-    let allMembers: [MemberSnapshot]
-    let activeLoans: [LoanSnapshot]
-    let memberSnapshot: MemberSnapshot?  // For member statement
-    let monthlyReportData: MonthlyReportData?
-    let analyticsData: AnalyticsData?
-}
+final class PDFGenerator {
 
-class PDFGenerator {
+    // MARK: Public entry points
 
-    // MARK: - Public Methods
-
-    func generateReport(type: ReportsView.ReportType,
-                       dataManager: DataManager,
-                       member: Member? = nil,
-                       startDate: Date,
-                       endDate: Date) async throws -> URL {
-
-        // Run everything on the main thread:
-        // 1. Core Data access (viewContext is main-thread only)
-        // 2. FundCalculator queries (uses viewContext)
-        // 3. AppKit drawing operations (NSFont, NSBezierPath, NSImage.draw, etc.)
-        //
-        // A single-page PDF generates in <100ms so main-thread execution is fine.
-        // The previous DispatchQueue.global() approach caused crashes/hangs because
-        // AppKit drawing primitives (especially NSImage.draw) are not thread-safe.
-        return try await MainActor.run {
-            let reportData = self.snapshotData(
-                type: type,
-                dataManager: dataManager,
-                member: member,
-                startDate: startDate,
-                endDate: endDate
-            )
-            return try self.createPDF(reportData: reportData)
+    /// Build the fund-wide compiled statement for `month`.
+    func generateMonthlyStatement(month: StatementMonth,
+                                  dataManager: DataManager) async throws -> URL {
+        try await MainActor.run {
+            let snapshot = self.snapshotMonthly(month: month, dataManager: dataManager)
+            return try self.renderMonthly(snapshot)
         }
     }
 
-    // MARK: - Data Snapshotting (Main Thread)
-
-    /// Captures all Core Data values into plain Swift structs.
-    /// Must be called on the main thread before dispatching to background.
-    private func snapshotData(type: ReportsView.ReportType,
-                             dataManager: DataManager,
-                             member: Member?,
-                             startDate: Date,
-                             endDate: Date) -> PDFReportData {
-
-        let fundSummary = FundCalculator.shared.generateFundSummary()
-
-        let allMembers = dataManager.members.map { MemberSnapshot(member: $0) }
-        let activeMembers = dataManager.members
-            .filter { $0.memberStatus == .active }
-            .map { MemberSnapshot(member: $0) }
-
-        // For Loan Summary the user has selected a period; show loans
-        // *issued* in that window (matches the in-app view at
-        // ReportsView.LoanSummaryReport.filteredLoans). All other report
-        // types still want the current snapshot of active loans.
-        let activeLoans: [LoanSnapshot]
-        if type == .loanSummary {
-            activeLoans = dataManager.allLoans
-                .filter { loan in
-                    guard let issued = loan.issueDate else { return false }
-                    return issued >= startDate && issued <= endDate
-                }
-                .map { LoanSnapshot(loan: $0) }
-        } else {
-            activeLoans = dataManager.activeLoans.map { LoanSnapshot(loan: $0) }
+    /// Build the per-member statement for `member` and `month`.
+    func generateMemberStatement(member: Member,
+                                 month: StatementMonth,
+                                 dataManager: DataManager) async throws -> URL {
+        try await MainActor.run {
+            let snapshot = self.snapshotMember(member: member, month: month)
+            return try self.renderMember(snapshot)
         }
+    }
 
-        let memberSnapshot = member.map { MemberSnapshot(member: $0) }
+    // MARK: Snapshot building (Core Data → plain structs)
 
-        // Pre-calculate monthly report data if needed
-        var monthlyReportData: MonthlyReportData?
-        if type == .monthlyReport {
-            let loansIssuedInPeriod = dataManager.activeLoans.filter { loan in
-                guard let issueDate = loan.issueDate else { return false }
-                return issueDate >= startDate && issueDate <= endDate
+    @MainActor
+    private func snapshotMonthly(month: StatementMonth,
+                                 dataManager: DataManager) -> MonthlyStatementSnapshot {
+        let calc = StatementCalculator(asOf: month.endDate)
+
+        let activeMembers = dataManager.members.filter { calc.wasActive($0) }
+
+        let memberRows = activeMembers
+            .map { member in
+                MonthlyStatementSnapshot.MemberRow(
+                    name: member.name ?? "Unknown",
+                    role: member.memberRole.displayName,
+                    contributions: calc.contributions(for: member),
+                    loanBalance: calc.outstandingLoanBalance(for: member),
+                    monthlyPayment: calc.monthlyLoanPaymentDue(for: member)
+                )
             }
-            let totalLoansIssued = loansIssuedInPeriod.reduce(0) { $0 + $1.amount }
+            .sorted { $0.name < $1.name }
 
-            var totalContributions: Double = 0
-            for m in dataManager.members {
-                if let payments = m.payments?.allObjects as? [Payment] {
-                    for payment in payments {
-                        if let date = payment.paymentDate,
-                           date >= startDate && date <= endDate &&
-                           payment.contributionAmount > 0 {
-                            totalContributions += payment.contributionAmount
-                        }
-                    }
-                }
+        // Active-as-of-end-of-month loans (issued by then, not yet completed).
+        let allLoans = (try? PersistenceController.shared.container.viewContext.fetch(Loan.fetchRequest())) ?? []
+        let activeLoans = allLoans
+            .filter { loan in
+                guard let issued = loan.issueDate, issued <= month.endDate else { return false }
+                if let completed = loan.completedDate, completed <= month.endDate { return false }
+                return calc.balance(for: loan) > 0.01
             }
-
-            let newMembers = dataManager.members.filter { m in
-                guard let joinDate = m.joinDate else { return false }
-                return joinDate >= startDate && joinDate <= endDate
+            .map { loan in
+                MonthlyStatementSnapshot.LoanRow(
+                    memberName: loan.member?.name ?? "Unknown",
+                    originalAmount: loan.amount,
+                    balance: calc.balance(for: loan),
+                    monthlyPayment: loan.monthlyPayment,
+                    issueDate: loan.issueDate,
+                    dueDate: loan.dueDate
+                )
             }
+            .sorted { $0.memberName < $1.memberName }
 
-            monthlyReportData = MonthlyReportData(
-                newMembersCount: newMembers.count,
-                totalContributions: totalContributions,
-                loansIssuedCount: loansIssuedInPeriod.count,
-                totalLoansIssued: totalLoansIssued
-            )
-        }
-
-        // Pre-calculate analytics data if needed
-        var analyticsData: AnalyticsData?
-        if type == .analytics {
-            let loans = dataManager.activeLoans
-            let averageLoanAmount = loans.isEmpty ? 0 : loans.reduce(0) { $0 + $1.amount } / Double(loans.count)
-
-            let completedLoans = dataManager.members.flatMap { m in
-                (m.loans?.allObjects as? [Loan] ?? []).filter { $0.loanStatus == .completed }
-            }
-            let totalLoans = dataManager.members.flatMap { m in
-                (m.loans?.allObjects as? [Loan] ?? [])
-            }
-            let repaymentRate = totalLoans.isEmpty ? 0 : Double(completedLoans.count) / Double(totalLoans.count)
-
-            let membersByRole = Dictionary(grouping: dataManager.members) { $0.memberRole }
-            let roleData = membersByRole.map { (role: $0.key.displayName, count: $0.value.count) }
-                .sorted { $0.count > $1.count }
-
-            analyticsData = AnalyticsData(
-                averageLoanAmount: averageLoanAmount,
-                repaymentRate: repaymentRate,
-                fundSummary: fundSummary,
-                membersByRole: roleData,
-                activeLoansCount: loans.count
-            )
-        }
-
-        return PDFReportData(
-            type: type,
-            startDate: startDate,
-            endDate: endDate,
-            fundSummary: fundSummary,
-            activeMembers: activeMembers,
-            allMembers: allMembers,
-            activeLoans: activeLoans,
-            memberSnapshot: memberSnapshot,
-            monthlyReportData: monthlyReportData,
-            analyticsData: analyticsData
+        return MonthlyStatementSnapshot(
+            month: month,
+            fundBalance: calc.fundBalance(),
+            totalContributions: calc.totalContributions(),
+            totalOutstandingLoans: calc.totalOutstandingLoans(),
+            activeMembersCount: activeMembers.count,
+            memberRows: memberRows,
+            activeLoans: activeLoans
         )
     }
 
-    // MARK: - PDF Creation (Background Thread - No Core Data Access)
+    @MainActor
+    private func snapshotMember(member: Member, month: StatementMonth) -> MemberStatementSnapshot {
+        let opening = StatementCalculator(asOf: month.priorMonthEndDate)
+        let closing = StatementCalculator(asOf: month.endDate)
 
-    private func createPDF(reportData: PDFReportData) throws -> URL {
+        var entries: [MemberStatementSnapshot.Entry] = []
 
-        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792) // US Letter
+        let payments = (member.payments?.allObjects as? [Payment]) ?? []
+        for payment in payments {
+            guard let date = payment.paymentDate,
+                  date >= month.startDate, date <= month.endDate else { continue }
+            if payment.contributionAmount > 0 {
+                entries.append(.init(
+                    date: date,
+                    kind: "Contribution",
+                    detail: "Monthly contribution",
+                    signedAmount: payment.contributionAmount
+                ))
+            }
+            if payment.loanRepaymentAmount > 0 {
+                entries.append(.init(
+                    date: date,
+                    kind: "Loan Repayment",
+                    detail: "Loan payment",
+                    signedAmount: -payment.loanRepaymentAmount
+                ))
+            }
+        }
 
-        // Create graphics context with PDF document metadata so when
-        // recipients open the file (e.g. on iPhone via WhatsApp/Mail),
-        // Preview/Quick Look surfaces a real Title and Author instead of
-        // the raw filename.
+        let loans = (member.loans?.allObjects as? [Loan]) ?? []
+        for loan in loans {
+            guard let issued = loan.issueDate,
+                  issued >= month.startDate, issued <= month.endDate else { continue }
+            entries.append(.init(
+                date: issued,
+                kind: "Loan Disbursed",
+                detail: "Loan amount: \(CurrencyFormatter.shared.format(loan.amount))",
+                signedAmount: -loan.amount
+            ))
+        }
+
+        let activeLoans = loans
+            .filter { loan in
+                guard let issued = loan.issueDate, issued <= month.endDate else { return false }
+                if let completed = loan.completedDate, completed <= month.endDate { return false }
+                return closing.balance(for: loan) > 0.01
+            }
+            .map { loan in
+                MemberStatementSnapshot.ActiveLoan(
+                    originalAmount: loan.amount,
+                    balance: closing.balance(for: loan),
+                    monthlyPayment: loan.monthlyPayment,
+                    nextDueDate: loan.nextPaymentDue
+                )
+            }
+
+        return MemberStatementSnapshot(
+            month: month,
+            memberName: member.name ?? "Unknown",
+            memberRole: member.memberRole.displayName,
+            joinDate: member.joinDate,
+            openingContributions: opening.contributions(for: member),
+            closingContributions: closing.contributions(for: member),
+            openingLoanBalance: opening.outstandingLoanBalance(for: member),
+            closingLoanBalance: closing.outstandingLoanBalance(for: member),
+            entries: entries.sorted { $0.date < $1.date },
+            activeLoans: activeLoans
+        )
+    }
+
+    // MARK: Rendering — Monthly Statement
+
+    private func renderMonthly(_ s: MonthlyStatementSnapshot) throws -> URL {
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let auxiliary: [String: Any] = [
+            kCGPDFContextTitle as String: "Solidarity Fund — Statement for \(s.month.displayName)",
+            kCGPDFContextAuthor as String: "Bob Kitchen",
+            kCGPDFContextCreator as String: "Parachichi House Solidarity Fund",
+            kCGPDFContextSubject as String: "Monthly statement of contributions and loans, \(s.month.displayName)",
+            kCGPDFContextKeywords as String: "Solidarity Fund, Parachichi House, Monthly Statement"
+        ]
+
+        return try renderPDF(pageRect: pageRect, auxiliary: auxiliary, fileNameStem: "ParachichiHouse_Statement_\(s.month.fileNameLabel)") { rect in
+            var y = rect.height - 50
+            y = drawHeader(in: rect, at: y, subtitle: "Statement for \(s.month.displayName)")
+            y -= 8
+            y = drawMetricsRow(in: rect, at: y, snapshot: s)
+            y -= 16
+
+            if !s.activeLoans.isEmpty {
+                y = drawSection(title: "Active Loans (\(s.activeLoans.count))", in: rect, at: y)
+                y = drawActiveLoanTable(in: rect, at: y, loans: s.activeLoans)
+                y -= 16
+            }
+
+            y = drawSection(title: "Member Summary", in: rect, at: y)
+            _ = drawMemberSummaryTable(in: rect, at: y, rows: s.memberRows)
+
+            drawFooter(in: rect, label: "Statement for \(s.month.displayName)")
+        }
+    }
+
+    // MARK: Rendering — Member Statement
+
+    private func renderMember(_ s: MemberStatementSnapshot) throws -> URL {
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let auxiliary: [String: Any] = [
+            kCGPDFContextTitle as String: "\(s.memberName) — Statement for \(s.month.displayName)",
+            kCGPDFContextAuthor as String: "Bob Kitchen",
+            kCGPDFContextCreator as String: "Parachichi House Solidarity Fund",
+            kCGPDFContextSubject as String: "Member statement, \(s.memberName), \(s.month.displayName)",
+            kCGPDFContextKeywords as String: "Solidarity Fund, Parachichi House, Member Statement"
+        ]
+        let safeName = s.memberName.replacingOccurrences(of: " ", with: "-")
+
+        return try renderPDF(pageRect: pageRect, auxiliary: auxiliary, fileNameStem: "ParachichiHouse_\(safeName)_\(s.month.fileNameLabel)") { rect in
+            var y = rect.height - 50
+            y = drawHeader(in: rect, at: y, subtitle: "Statement for \(s.month.displayName)")
+            y -= 8
+            y = drawMemberHeading(in: rect, at: y, snapshot: s)
+            y -= 14
+            y = drawOpeningClosing(in: rect, at: y, snapshot: s)
+            y -= 16
+
+            y = drawSection(title: "Activity in \(s.month.displayName)", in: rect, at: y)
+            y = drawMemberEntriesTable(in: rect, at: y, entries: s.entries)
+
+            if !s.activeLoans.isEmpty {
+                y -= 16
+                y = drawSection(title: "Outstanding Obligations", in: rect, at: y)
+                _ = drawActiveLoanFooter(in: rect, at: y, loans: s.activeLoans)
+            }
+
+            drawFooter(in: rect, label: "\(s.memberName) — \(s.month.displayName)")
+        }
+    }
+
+    // MARK: PDF context plumbing
+
+    private func renderPDF(pageRect: CGRect,
+                           auxiliary: [String: Any],
+                           fileNameStem: String,
+                           body: (CGRect) -> Void) throws -> URL {
         let data = NSMutableData()
         var mediaBox = pageRect
-        let auxiliaryInfo = self.pdfAuxiliaryInfo(for: reportData)
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
-              let pdfContext = CGContext(consumer: consumer, mediaBox: &mediaBox, auxiliaryInfo as CFDictionary) else {
+              let cg = CGContext(consumer: consumer, mediaBox: &mediaBox, auxiliary as CFDictionary) else {
             throw PDFError.contextCreationFailed
         }
 
-        // Begin PDF page
-        let pageInfo: [String: Any] = [:]
-        pdfContext.beginPDFPage(pageInfo as CFDictionary)
-
-        // Save graphics state
+        cg.beginPDFPage([:] as CFDictionary)
         NSGraphicsContext.saveGraphicsState()
-        let nsContext = NSGraphicsContext(cgContext: pdfContext, flipped: false)
-        NSGraphicsContext.current = nsContext
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: false)
 
-        // Draw content based on report type
-        var currentY: CGFloat = pageRect.height - 50
+        body(pageRect)
 
-        // Draw header
-        currentY = drawHeader(type: reportData.type, in: pageRect, at: currentY)
-
-        // Draw content based on report type
-        switch reportData.type {
-        case .fundOverview:
-            currentY = drawFundOverview(fundSummary: reportData.fundSummary, in: pageRect, at: currentY)
-        case .memberStatement:
-            if let memberSnapshot = reportData.memberSnapshot {
-                currentY = drawMemberStatement(member: memberSnapshot, in: pageRect, at: currentY)
-            }
-        case .loanSummary:
-            currentY = drawLoanSummary(activeLoans: reportData.activeLoans, startDate: reportData.startDate, endDate: reportData.endDate, in: pageRect, at: currentY)
-        case .monthlyReport:
-            if let data = reportData.monthlyReportData {
-                currentY = drawMonthlyReport(data: data, startDate: reportData.startDate, endDate: reportData.endDate, in: pageRect, at: currentY)
-            }
-        case .analytics:
-            if let data = reportData.analyticsData {
-                currentY = drawAnalyticsReport(data: data, in: pageRect, at: currentY)
-            }
-        case .fundSummary:
-            currentY = drawFundSummary(fundSummary: reportData.fundSummary, activeMembers: reportData.activeMembers, activeLoans: reportData.activeLoans, in: pageRect, at: currentY)
-        }
-
-        // Draw footer
-        drawFooter(in: pageRect)
-
-        // Restore graphics state
         NSGraphicsContext.restoreGraphicsState()
+        cg.endPDFPage()
+        cg.closePDF()
 
-        // End PDF page
-        pdfContext.endPDFPage()
-        pdfContext.closePDF()
-
-        // Save to file. ISO-style date in the filename is friendlier than
-        // the raw epoch we used to emit, and sorts naturally in Finder.
-        let fileName = "\(reportData.type.rawValue.replacingOccurrences(of: " ", with: "_"))_\(Self.fileNameDateFormatter.string(from: Date())).pdf"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fileNameStem).pdf")
         try data.write(to: url)
-
         return url
     }
 
-    private static let fileNameDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
+    // MARK: Header / footer
 
-    /// Metadata embedded in the PDF document itself (read by Preview,
-    /// Quick Look, Files app, Mail, WhatsApp, etc.).
-    private func pdfAuxiliaryInfo(for reportData: PDFReportData) -> [String: Any] {
-        let monthYear: String = {
-            let f = DateFormatter()
-            f.dateFormat = "MMMM yyyy"
-            return f.string(from: reportData.endDate)
-        }()
-        let title = "\(reportData.type.rawValue) — \(monthYear)"
-        return [
-            kCGPDFContextTitle as String: title,
-            kCGPDFContextAuthor as String: "Bob Kitchen",
-            kCGPDFContextCreator as String: "Parachichi House Solidarity Fund",
-            kCGPDFContextSubject as String: "Parachichi House Solidarity Fund — \(reportData.type.rawValue)",
-            kCGPDFContextKeywords as String: "Solidarity Fund, Parachichi House, \(reportData.type.rawValue)"
-        ]
-    }
+    /// Draws the brand block at the top of either report. Returns the
+    /// y-coordinate immediately below the block.
+    @discardableResult
+    private func drawHeader(in pageRect: CGRect, at yPosition: CGFloat, subtitle: String) -> CGFloat {
+        var y = yPosition
+        let leftMargin: CGFloat = 40
+        let blockHeight: CGFloat = 70
 
-    // MARK: - Drawing Methods (Use only snapshot data, never Core Data objects)
+        // Background band
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.10).cgColor)
+        cg?.fill(CGRect(x: 0, y: y - blockHeight, width: pageRect.width, height: blockHeight))
+        cg?.restoreGState()
 
-    private func drawHeader(type: ReportsView.ReportType, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        // For Fund Summary, use compact header drawn in drawFundSummary
-        if type == .fundSummary {
-            return yPosition
+        // Logo
+        let logoSize: CGFloat = 50
+        let logoRect = CGRect(x: leftMargin, y: y - blockHeight + 10, width: logoSize, height: logoSize)
+        if let img = NSImage(named: "AvocadoLogo") {
+            img.draw(in: logoRect)
+        } else {
+            drawTextLogoFallback(in: logoRect)
         }
 
-        var currentY = yPosition
-
         // Title
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 24),
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
+        "Parachichi House — Solidarity Fund"
+            .draw(at: CGPoint(x: leftMargin + logoSize + 15, y: y - 30), withAttributes: titleAttrs)
 
-        let title = "Parachichi House Solidarity Fund"
-        let titleSize = title.size(withAttributes: titleAttributes)
-        let titleRect = CGRect(x: (pageRect.width - titleSize.width) / 2, y: currentY - titleSize.height, width: titleSize.width, height: titleSize.height)
-        title.draw(in: titleRect, withAttributes: titleAttributes)
-
-        currentY -= titleSize.height + 10
-
-        // Report type
-        let subtitleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 18),
+        // Subtitle
+        let subAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13),
             .foregroundColor: NSColor.darkGray
         ]
+        subtitle.draw(at: CGPoint(x: leftMargin + logoSize + 15, y: y - 50), withAttributes: subAttrs)
 
-        let subtitle = type.rawValue
-        let subtitleSize = subtitle.size(withAttributes: subtitleAttributes)
-        let subtitleRect = CGRect(x: (pageRect.width - subtitleSize.width) / 2, y: currentY - subtitleSize.height, width: subtitleSize.width, height: subtitleSize.height)
-        subtitle.draw(in: subtitleRect, withAttributes: subtitleAttributes)
-
-        currentY -= subtitleSize.height + 5
-
-        // Date
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .long
-        let dateString = "Generated on \(dateFormatter.string(from: Date()))"
-
-        let dateAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: NSColor.gray
-        ]
-
-        let dateSize = dateString.size(withAttributes: dateAttributes)
-        let dateRect = CGRect(x: (pageRect.width - dateSize.width) / 2, y: currentY - dateSize.height, width: dateSize.width, height: dateSize.height)
-        dateString.draw(in: dateRect, withAttributes: dateAttributes)
-
-        currentY -= dateSize.height + 20
-
-        // Draw separator line
-        let context = NSGraphicsContext.current?.cgContext
-        context?.setStrokeColor(NSColor.gray.cgColor)
-        context?.setLineWidth(1)
-        context?.move(to: CGPoint(x: 50, y: currentY))
-        context?.addLine(to: CGPoint(x: pageRect.width - 50, y: currentY))
-        context?.strokePath()
-
-        return currentY - 20
-    }
-
-    private func drawFooter(in pageRect: CGRect) {
-        let context = NSGraphicsContext.current?.cgContext
-
-        // Draw footer separator line
-        context?.saveGState()
-        context?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.2).cgColor)
-        context?.setLineWidth(0.5)
-        context?.move(to: CGPoint(x: 40, y: 35))
-        context?.addLine(to: CGPoint(x: pageRect.width - 40, y: 35))
-        context?.strokePath()
-        context?.restoreGState()
-
-        let footerAttributes: [NSAttributedString.Key: Any] = [
+        // "Issued" date right-aligned
+        let issuedAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.darkGray
         ]
+        let issued = "Issued \(DateFormatter.fullDate.string(from: Date()))"
+        let issuedSize = issued.size(withAttributes: issuedAttrs)
+        issued.draw(
+            at: CGPoint(x: pageRect.width - 40 - issuedSize.width, y: y - 50),
+            withAttributes: issuedAttrs
+        )
 
-        let leftText = "Page 1 of 1"
-        let centerText = "Parachichi House Solidarity Fund"
-        let rightText = "Generated on \(DateFormatter.mediumDate.string(from: Date()))"
-
-        // Left text
-        leftText.draw(at: CGPoint(x: 40, y: 20), withAttributes: footerAttributes)
-
-        // Center text
-        let centerSize = centerText.size(withAttributes: footerAttributes)
-        centerText.draw(at: CGPoint(x: (pageRect.width - centerSize.width) / 2, y: 20), withAttributes: footerAttributes)
-
-        // Right text
-        let rightSize = rightText.size(withAttributes: footerAttributes)
-        rightText.draw(at: CGPoint(x: pageRect.width - rightSize.width - 40, y: 20), withAttributes: footerAttributes)
+        y -= blockHeight
+        return y
     }
 
-    private func drawFundOverview(fundSummary: FundSummary, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
+    private func drawFooter(in pageRect: CGRect, label: String) {
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.25).cgColor)
+        cg?.setLineWidth(0.5)
+        cg?.move(to: CGPoint(x: 40, y: 35))
+        cg?.addLine(to: CGPoint(x: pageRect.width - 40, y: 35))
+        cg?.strokePath()
+        cg?.restoreGState()
 
-        // Fund Balance Section
-        currentY = drawSectionTitle("Fund Balance", at: currentY, in: pageRect)
-        currentY -= 20
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9),
+            .foregroundColor: NSColor.darkGray
+        ]
+        label.draw(at: CGPoint(x: 40, y: 20), withAttributes: attrs)
 
-        let balanceText = CurrencyFormatter.shared.format(fundSummary.fundBalance)
-        currentY = drawKeyValue("Current Balance:", value: balanceText, at: currentY, in: pageRect)
-        currentY = drawKeyValue("Total Contributions:", value: CurrencyFormatter.shared.format(fundSummary.totalContributions), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Active Loans:", value: CurrencyFormatter.shared.format(fundSummary.totalActiveLoans), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Bob's Investment:", value: CurrencyFormatter.shared.format(fundSummary.bobRemainingInvestment), at: currentY, in: pageRect)
-
-        currentY -= 30
-
-        // Utilization Section
-        currentY = drawSectionTitle("Fund Utilization", at: currentY, in: pageRect)
-        currentY -= 20
-
-        let utilizationPercent = String(format: "%.1f%%", fundSummary.utilizationPercentage * 100)
-        currentY = drawKeyValue("Utilization:", value: utilizationPercent, at: currentY, in: pageRect)
-        currentY = drawKeyValue("Active Members:", value: "\(fundSummary.activeMembers)", at: currentY, in: pageRect)
-        currentY = drawKeyValue("Active Loans:", value: "\(fundSummary.activeLoansCount)", at: currentY, in: pageRect)
-
-        return currentY
+        let right = "Parachichi House Solidarity Fund"
+        let rightSize = right.size(withAttributes: attrs)
+        right.draw(at: CGPoint(x: pageRect.width - 40 - rightSize.width, y: 20), withAttributes: attrs)
     }
 
-    private func drawMemberStatement(member: MemberSnapshot, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-
-        // Member Information
-        currentY = drawSectionTitle("Member Information", at: currentY, in: pageRect)
-        currentY -= 20
-
-        currentY = drawKeyValue("Name:", value: member.name, at: currentY, in: pageRect)
-        currentY = drawKeyValue("Role:", value: member.role, at: currentY, in: pageRect)
-        currentY = drawKeyValue("Status:", value: member.status, at: currentY, in: pageRect)
-        currentY = drawKeyValue("Join Date:", value: DateFormatter.mediumDate.string(from: member.joinDate ?? Date()), at: currentY, in: pageRect)
-
-        currentY -= 30
-
-        // Financial Summary
-        currentY = drawSectionTitle("Financial Summary", at: currentY, in: pageRect)
-        currentY -= 20
-
-        currentY = drawKeyValue("Total Contributions:", value: CurrencyFormatter.shared.format(member.totalContributions), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Current Loan Balance:", value: CurrencyFormatter.shared.format(member.totalActiveLoanBalance), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Available for Loan:", value: CurrencyFormatter.shared.format(member.maximumLoanAmount), at: currentY, in: pageRect)
-
-        return currentY
-    }
-
-    private func drawLoanSummary(activeLoans: [LoanSnapshot], startDate: Date, endDate: Date, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-
-        currentY = drawSectionTitle("Loan Summary Report", at: currentY, in: pageRect)
-        currentY -= 20
-
-        currentY = drawKeyValue("Period:", value: "\(DateFormatter.mediumDate.string(from: startDate)) - \(DateFormatter.mediumDate.string(from: endDate))", at: currentY, in: pageRect)
-
-        let totalLoanAmount = activeLoans.reduce(0) { $0 + $1.amount }
-        let totalOutstanding = activeLoans.reduce(0) { $0 + $1.balance }
-        let overdueLoans = activeLoans.filter { $0.isOverdue }
-
-        currentY = drawKeyValue("Total Loans Issued:", value: CurrencyFormatter.shared.format(totalLoanAmount), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Outstanding Balance:", value: CurrencyFormatter.shared.format(totalOutstanding), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Number of Loans:", value: "\(activeLoans.count)", at: currentY, in: pageRect)
-        currentY = drawKeyValue("Overdue Loans:", value: "\(overdueLoans.count)", at: currentY, in: pageRect)
-
-        currentY -= 20
-
-        // Draw loan details
-        if !activeLoans.isEmpty {
-            currentY = drawSectionTitle("Loan Details", at: currentY, in: pageRect)
-            currentY -= 15
-
-            for loan in activeLoans {
-                let loanInfo = "\(loan.memberName) - \(CurrencyFormatter.shared.format(loan.amount))"
-                let balanceInfo = "Balance: \(CurrencyFormatter.shared.format(loan.balance))"
-                let statusInfo = loan.isOverdue ? " (OVERDUE)" : ""
-
-                currentY = drawKeyValue("  Loan:", value: "\(loanInfo)\(statusInfo)", at: currentY, in: pageRect)
-                currentY = drawKeyValue("  ", value: balanceInfo, at: currentY, in: pageRect)
-                currentY -= 5
-            }
-        }
-
-        return currentY
-    }
-
-    private func drawMonthlyReport(data: MonthlyReportData, startDate: Date, endDate: Date, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-
-        currentY = drawSectionTitle("Monthly Report", at: currentY, in: pageRect)
-        currentY -= 20
-
-        currentY = drawKeyValue("Period:", value: "\(DateFormatter.mediumDate.string(from: startDate)) - \(DateFormatter.mediumDate.string(from: endDate))", at: currentY, in: pageRect)
-
-        currentY = drawKeyValue("New Members:", value: "\(data.newMembersCount)", at: currentY, in: pageRect)
-        currentY = drawKeyValue("Total Contributions:", value: CurrencyFormatter.shared.format(data.totalContributions), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Loans Issued:", value: "\(data.loansIssuedCount)", at: currentY, in: pageRect)
-        currentY = drawKeyValue("Loan Amount Issued:", value: CurrencyFormatter.shared.format(data.totalLoansIssued), at: currentY, in: pageRect)
-
-        return currentY
-    }
-
-    private func drawAnalyticsReport(data: AnalyticsData, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-
-        currentY = drawSectionTitle("Analytics Report", at: currentY, in: pageRect)
-        currentY -= 20
-
-        let utilizationPercent = String(format: "%.1f%%", data.fundSummary.utilizationPercentage * 100)
-
-        currentY = drawKeyValue("Average Loan Amount:", value: CurrencyFormatter.shared.format(data.averageLoanAmount), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Repayment Success Rate:", value: String(format: "%.1f%%", data.repaymentRate * 100), at: currentY, in: pageRect)
-        currentY = drawKeyValue("Fund Utilization:", value: utilizationPercent, at: currentY, in: pageRect)
-        currentY = drawKeyValue("Active Members:", value: "\(data.fundSummary.activeMembers)", at: currentY, in: pageRect)
-        currentY = drawKeyValue("Active Loans:", value: "\(data.activeLoansCount)", at: currentY, in: pageRect)
-
-        currentY -= 20
-
-        // Member distribution
-        currentY = drawSectionTitle("Member Distribution", at: currentY, in: pageRect)
-        currentY -= 15
-
-        for (role, count) in data.membersByRole {
-            currentY = drawKeyValue("  \(role):", value: "\(count)", at: currentY, in: pageRect)
-        }
-
-        return currentY
-    }
-
-    private func drawFundSummary(fundSummary: FundSummary, activeMembers: [MemberSnapshot], activeLoans: [LoanSnapshot], in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-
-        // Compact Header
-        currentY = drawCompactHeader(in: pageRect, at: currentY)
-        currentY -= 20
-
-        // Fund Overview Metrics Cards
-        currentY = drawMetricCards(fundSummary: fundSummary, activeMembers: activeMembers.count, in: pageRect, at: currentY)
-        currentY -= 30
-
-        // Active Loans Section
-        if !activeLoans.isEmpty {
-            currentY = drawActiveLoansSection(loans: activeLoans, in: pageRect, at: currentY)
-            currentY -= 30
-        }
-
-        // Member Summary Table - Main focus of the report
-        currentY = drawMemberSummaryTable(activeMembers: activeMembers, in: pageRect, at: currentY)
-
-        return currentY
-    }
-
-    /// Avocado-green disc with "PHSF" monogram — used only when the
-    /// asset-catalog logo can't be loaded, so the report still has
-    /// a recognisable brand mark in the header.
+    /// Avocado-green disc with monogram — stand-in for the logo asset
+    /// when it can't be loaded, so the report still has a brand mark.
     private func drawTextLogoFallback(in rect: CGRect) {
-        let context = NSGraphicsContext.current?.cgContext
-        context?.saveGState()
-        // Avocado-green disc background.
-        let avocado = NSColor(calibratedRed: 0.42, green: 0.55, blue: 0.30, alpha: 1.0)
-        context?.setFillColor(avocado.cgColor)
-        let path = NSBezierPath(ovalIn: rect)
-        path.fill()
-        // Monogram.
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        let avocado = NSColor(calibratedRed: 0.42, green: 0.55, blue: 0.30, alpha: 1)
+        cg?.setFillColor(avocado.cgColor)
+        NSBezierPath(ovalIn: rect).fill()
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 14, weight: .bold),
             .foregroundColor: NSColor.white
         ]
         let text = "PHSF"
         let size = text.size(withAttributes: attrs)
-        let drawPoint = CGPoint(x: rect.midX - size.width / 2,
-                                y: rect.midY - size.height / 2)
-        text.draw(at: drawPoint, withAttributes: attrs)
-        context?.restoreGState()
+        text.draw(at: CGPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
+                  withAttributes: attrs)
+        cg?.restoreGState()
     }
 
-    private func drawCompactHeader(in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-        let leftMargin: CGFloat = 40
-        let headerHeight: CGFloat = 70
+    // MARK: Section helpers
 
-        // Draw header background
-        let context = NSGraphicsContext.current?.cgContext
-        context?.saveGState()
-        context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.1).cgColor)
-        let headerRect = CGRect(x: 0, y: currentY - headerHeight, width: pageRect.width, height: headerHeight)
-        context?.fill(headerRect)
-        context?.restoreGState()
-
-        // Draw logo — with a clean text-mark fallback so a missing asset
-        // never leaves the report visually unbranded.
-        let logoSize: CGFloat = 50
-        let logoRect = CGRect(x: leftMargin, y: currentY - headerHeight + 10, width: logoSize, height: logoSize)
-        if let logoImage = NSImage(named: "AvocadoLogo") {
-            logoImage.draw(in: logoRect)
-        } else {
-            drawTextLogoFallback(in: logoRect)
-        }
-
-        // Title - Line 1
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
-            .foregroundColor: NSColor.black
-        ]
-        let title1 = "Parachichi House - Solidarity Fund"
-        title1.draw(at: CGPoint(x: leftMargin + logoSize + 15, y: currentY - 30), withAttributes: titleAttributes)
-
-        // Title - Line 2 with current month and year
-        let subtitleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14),
-            .foregroundColor: NSColor.darkGray
-        ]
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "MMMM yyyy"
-        let monthYear = dateFormatter.string(from: Date())
-        let title2 = "Monthly Report - \(monthYear)"
-        title2.draw(at: CGPoint(x: leftMargin + logoSize + 15, y: currentY - 50), withAttributes: subtitleAttributes)
-
-        return currentY - headerHeight
-    }
-
-    private func drawMetricCards(fundSummary: FundSummary, activeMembers: Int, in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        let currentY = yPosition
-        let leftMargin: CGFloat = 40
-        let cardWidth: CGFloat = (pageRect.width - (leftMargin * 2) - 30) / 4 // 4 cards with spacing
-        let cardHeight: CGFloat = 70  // Increased height for better label visibility
-        let spacing: CGFloat = 10
-
-        // Fix utilization calculation - multiply by 100 for percentage
-        let utilizationPercentage = fundSummary.utilizationPercentage * 100
-
-        // Define metrics
-        let metrics = [
-            ("Fund Balance", CurrencyFormatter.shared.format(fundSummary.fundBalance), NSColor.systemGreen),
-            ("Active Loans", CurrencyFormatter.shared.format(fundSummary.totalActiveLoans), NSColor.systemOrange),
-            ("Utilization", String(format: "%.1f%%", utilizationPercentage),
-             utilizationPercentage > 60 ? NSColor.systemRed : NSColor.systemBlue),
-            ("Members", "\(activeMembers)", NSColor.systemPurple)
-        ]
-
-        var xPosition = leftMargin
-
-        for (title, value, color) in metrics {
-            drawMetricCard(title: title, value: value, color: color,
-                          at: CGRect(x: xPosition, y: currentY - cardHeight, width: cardWidth, height: cardHeight))
-            xPosition += cardWidth + spacing
-        }
-
-        return currentY - cardHeight
-    }
-
-    private func drawMetricCard(title: String, value: String, color: NSColor, at rect: CGRect) {
-        let context = NSGraphicsContext.current?.cgContext
-
-        // Card background with subtle shadow
-        context?.saveGState()
-
-        // Shadow
-        context?.setShadow(offset: CGSize(width: 0, height: 2), blur: 4, color: NSColor.black.withAlphaComponent(0.1).cgColor)
-
-        // Background
-        context?.setFillColor(NSColor.white.cgColor)
-        let cardPath = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
-        cardPath.fill()
-
-        context?.restoreGState()
-
-        // Colored accent bar at bottom of card
-        context?.saveGState()
-        let accentHeight: CGFloat = 4
-        let accentRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: accentHeight)
-        context?.setFillColor(color.cgColor)
-        context?.fill(accentRect)
-        context?.restoreGState()
-
-        // Title - positioned below the top edge
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
-            .foregroundColor: NSColor.darkGray  // Explicit color for PDF
-        ]
-        title.draw(at: CGPoint(x: rect.minX + 10, y: rect.maxY - 20), withAttributes: titleAttributes)
-
-        // Value - centered in the card
-        let valueAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
-            .foregroundColor: NSColor.black  // Explicit color for PDF
-        ]
-        value.draw(at: CGPoint(x: rect.minX + 10, y: rect.minY + 20), withAttributes: valueAttributes)
-    }
-
-    private func drawActiveLoansSection(loans: [LoanSnapshot], in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-        let leftMargin: CGFloat = 40
-        let rightMargin: CGFloat = 40
-        let contentWidth = pageRect.width - leftMargin - rightMargin
-
-        // Section title
-        let titleAttributes: [NSAttributedString.Key: Any] = [
+    @discardableResult
+    private func drawSection(title: String, in pageRect: CGRect, at y: CGFloat) -> CGFloat {
+        let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        let title = "Active Loans (\(loans.count))"
-        title.draw(at: CGPoint(x: leftMargin, y: currentY - 15), withAttributes: titleAttributes)
-        currentY -= 25
+        title.draw(at: CGPoint(x: 40, y: y - 14), withAttributes: attrs)
+        return y - 22
+    }
 
-        // Group loans by member
-        let loansByMember = Dictionary(grouping: loans) { loan -> String in
-            loan.memberID?.uuidString ?? "unknown"
+    // MARK: Monthly — metrics row
+
+    private func drawMetricsRow(in pageRect: CGRect, at y: CGFloat, snapshot s: MonthlyStatementSnapshot) -> CGFloat {
+        let leftMargin: CGFloat = 40
+        let rightMargin: CGFloat = 40
+        let availableWidth = pageRect.width - leftMargin - rightMargin
+        let cardCount = 4
+        let spacing: CGFloat = 10
+        let cardWidth = (availableWidth - spacing * CGFloat(cardCount - 1)) / CGFloat(cardCount)
+        let cardHeight: CGFloat = 70
+
+        let cards: [(String, String, NSColor)] = [
+            ("Fund Balance",       CurrencyFormatter.shared.format(s.fundBalance),           .systemGreen),
+            ("Total Contributions", CurrencyFormatter.shared.format(s.totalContributions),    .systemBlue),
+            ("Outstanding Loans",  CurrencyFormatter.shared.format(s.totalOutstandingLoans), .systemOrange),
+            ("Active Members",     "\(s.activeMembersCount)",                                .systemPurple)
+        ]
+
+        var x = leftMargin
+        for (title, value, tint) in cards {
+            drawMetricCard(at: CGRect(x: x, y: y - cardHeight, width: cardWidth, height: cardHeight),
+                           title: title, value: value, tint: tint)
+            x += cardWidth + spacing
+        }
+        return y - cardHeight
+    }
+
+    private func drawMetricCard(at rect: CGRect, title: String, value: String, tint: NSColor) {
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setFillColor(NSColor.white.cgColor)
+        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
+        cg?.restoreGState()
+
+        // Accent bar
+        cg?.saveGState()
+        cg?.setFillColor(tint.cgColor)
+        cg?.fill(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 3))
+        cg?.restoreGState()
+
+        // Border
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.20).cgColor)
+        cg?.setLineWidth(0.5)
+        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).stroke()
+        cg?.restoreGState()
+
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: NSColor.darkGray
+        ]
+        title.draw(at: CGPoint(x: rect.minX + 10, y: rect.maxY - 22), withAttributes: titleAttrs)
+
+        let valueAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        value.draw(at: CGPoint(x: rect.minX + 10, y: rect.minY + 14), withAttributes: valueAttrs)
+    }
+
+    // MARK: Monthly — Active loan table
+
+    private func drawActiveLoanTable(in pageRect: CGRect, at yStart: CGFloat,
+                                     loans: [MonthlyStatementSnapshot.LoanRow]) -> CGFloat {
+        let leftMargin: CGFloat = 40
+        let widths: [CGFloat] = [180, 100, 100, 100, 60]  // name, amount, balance, monthly, due
+        let headers = ["Member", "Amount", "Balance", "Monthly", "Due"]
+        var y = drawTableHeader(headers, widths: widths, at: yStart, leftMargin: leftMargin)
+
+        for (index, loan) in loans.enumerated() {
+            // Alternating row background
+            if index % 2 == 1 {
+                let cg = NSGraphicsContext.current?.cgContext
+                cg?.saveGState()
+                cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.05).cgColor)
+                cg?.fill(CGRect(x: leftMargin - 4, y: y - 18, width: widths.reduce(0, +) + 8, height: 18))
+                cg?.restoreGState()
+            }
+
+            let dueLabel: String = {
+                guard let date = loan.dueDate else { return "—" }
+                return DateFormatter.shortMonth.string(from: date)
+            }()
+            let values = [
+                loan.memberName,
+                CurrencyFormatter.shared.format(loan.originalAmount),
+                CurrencyFormatter.shared.format(loan.balance),
+                CurrencyFormatter.shared.format(loan.monthlyPayment),
+                dueLabel
+            ]
+            drawTableRow(values, widths: widths, at: y, leftMargin: leftMargin, bold: false)
+            y -= 18
         }
 
-        // Sort members by name for consistent ordering
-        let sortedMemberIDs = loansByMember.keys.sorted { id1, id2 in
-            let name1 = loansByMember[id1]?.first?.memberName ?? ""
-            let name2 = loansByMember[id2]?.first?.memberName ?? ""
-            return name1 < name2
+        // Totals
+        y -= 4
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.cgColor)
+        cg?.setLineWidth(1)
+        cg?.move(to: CGPoint(x: leftMargin, y: y + 2))
+        cg?.addLine(to: CGPoint(x: leftMargin + widths.reduce(0, +), y: y + 2))
+        cg?.strokePath()
+        cg?.restoreGState()
+
+        let totalAmount = loans.reduce(0) { $0 + $1.originalAmount }
+        let totalBalance = loans.reduce(0) { $0 + $1.balance }
+        let totalMonthly = loans.reduce(0) { $0 + $1.monthlyPayment }
+        drawTableRow(
+            ["Total",
+             CurrencyFormatter.shared.format(totalAmount),
+             CurrencyFormatter.shared.format(totalBalance),
+             CurrencyFormatter.shared.format(totalMonthly),
+             ""],
+            widths: widths, at: y - 4, leftMargin: leftMargin, bold: true
+        )
+        return y - 22
+    }
+
+    // MARK: Monthly — Member summary table
+
+    private func drawMemberSummaryTable(in pageRect: CGRect, at yStart: CGFloat,
+                                        rows: [MonthlyStatementSnapshot.MemberRow]) -> CGFloat {
+        let leftMargin: CGFloat = 40
+        let widths: [CGFloat] = [150, 110, 100, 100, 80]  // name, role, contrib, loan, monthly
+        let headers = ["Name", "Role", "Contributions", "Loan Balance", "Monthly Due"]
+        var y = drawTableHeader(headers, widths: widths, at: yStart, leftMargin: leftMargin)
+
+        for (index, row) in rows.enumerated() {
+            if index % 2 == 1 {
+                let cg = NSGraphicsContext.current?.cgContext
+                cg?.saveGState()
+                cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.05).cgColor)
+                cg?.fill(CGRect(x: leftMargin - 4, y: y - 18, width: widths.reduce(0, +) + 8, height: 18))
+                cg?.restoreGState()
+            }
+            let values = [
+                row.name,
+                row.role,
+                CurrencyFormatter.shared.format(row.contributions),
+                row.loanBalance > 0 ? CurrencyFormatter.shared.format(row.loanBalance) : "—",
+                row.monthlyPayment > 0 ? CurrencyFormatter.shared.format(row.monthlyPayment) : "—"
+            ]
+            drawTableRow(values, widths: widths, at: y, leftMargin: leftMargin, bold: false)
+            y -= 18
         }
 
-        // Draw each member's loans
-        var membersDrawn = 0
-        for memberID in sortedMemberIDs {
-            guard let memberLoans = loansByMember[memberID],
-                  let firstLoan = memberLoans.first else { continue }
+        // Totals
+        y -= 4
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.cgColor)
+        cg?.setLineWidth(1)
+        cg?.move(to: CGPoint(x: leftMargin, y: y + 2))
+        cg?.addLine(to: CGPoint(x: leftMargin + widths.reduce(0, +), y: y + 2))
+        cg?.strokePath()
+        cg?.restoreGState()
 
-            // Limit to avoid overly long reports
-            if membersDrawn >= 10 { break }
+        let totalContrib = rows.reduce(0) { $0 + $1.contributions }
+        let totalLoan = rows.reduce(0) { $0 + $1.loanBalance }
+        let totalMonthly = rows.reduce(0) { $0 + $1.monthlyPayment }
+        drawTableRow(
+            ["Total", "",
+             CurrencyFormatter.shared.format(totalContrib),
+             CurrencyFormatter.shared.format(totalLoan),
+             CurrencyFormatter.shared.format(totalMonthly)],
+            widths: widths, at: y - 4, leftMargin: leftMargin, bold: true
+        )
+        return y - 22
+    }
 
-            currentY = drawMemberLoansGroup(memberName: firstLoan.memberName, loans: memberLoans, width: contentWidth, at: CGPoint(x: leftMargin, y: currentY))
-            currentY -= 10
-            membersDrawn += 1
+    // MARK: Member statement — heading & balances
+
+    private func drawMemberHeading(in pageRect: CGRect, at y: CGFloat, snapshot s: MemberStatementSnapshot) -> CGFloat {
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 18, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        s.memberName.draw(at: CGPoint(x: 40, y: y - 22), withAttributes: nameAttrs)
+
+        let metaAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.darkGray
+        ]
+        var meta = s.memberRole
+        if let join = s.joinDate {
+            meta += " • Member since \(DateFormatter.fullDate.string(from: join))"
         }
+        meta.draw(at: CGPoint(x: 40, y: y - 40), withAttributes: metaAttrs)
 
-        // Show "more" message if truncated
-        let totalMembers = sortedMemberIDs.count
-        if totalMembers > 10 {
-            let moreText = "... and \(totalMembers - 10) more members with active loans"
-            let moreAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9),
+        return y - 50
+    }
+
+    private func drawOpeningClosing(in pageRect: CGRect, at y: CGFloat, snapshot s: MemberStatementSnapshot) -> CGFloat {
+        let leftMargin: CGFloat = 40
+        let availableWidth = pageRect.width - leftMargin * 2
+        let cardWidth = (availableWidth - 12) / 2
+        let cardHeight: CGFloat = 80
+
+        drawBalancePairCard(
+            at: CGRect(x: leftMargin, y: y - cardHeight, width: cardWidth, height: cardHeight),
+            title: "Contributions",
+            opening: s.openingContributions,
+            closing: s.closingContributions,
+            tint: .systemBlue
+        )
+        drawBalancePairCard(
+            at: CGRect(x: leftMargin + cardWidth + 12, y: y - cardHeight, width: cardWidth, height: cardHeight),
+            title: "Loan Balance",
+            opening: s.openingLoanBalance,
+            closing: s.closingLoanBalance,
+            tint: s.closingLoanBalance > 0 ? .systemOrange : .systemGreen
+        )
+        return y - cardHeight
+    }
+
+    private func drawBalancePairCard(at rect: CGRect, title: String,
+                                     opening: Double, closing: Double, tint: NSColor) {
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setFillColor(NSColor.white.cgColor)
+        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
+        cg?.restoreGState()
+
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.20).cgColor)
+        cg?.setLineWidth(0.5)
+        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).stroke()
+        cg?.restoreGState()
+
+        // Accent stripe
+        cg?.saveGState()
+        cg?.setFillColor(tint.cgColor)
+        cg?.fill(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 3))
+        cg?.restoreGState()
+
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.darkGray
+        ]
+        title.draw(at: CGPoint(x: rect.minX + 10, y: rect.maxY - 22), withAttributes: titleAttrs)
+
+        let smallLabel: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8),
+            .foregroundColor: NSColor.gray
+        ]
+        let openingValueAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.darkGray
+        ]
+        let closingValueAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+
+        // Opening
+        "Opening".draw(at: CGPoint(x: rect.minX + 10, y: rect.minY + 28), withAttributes: smallLabel)
+        CurrencyFormatter.shared.format(opening).draw(
+            at: CGPoint(x: rect.minX + 10, y: rect.minY + 12),
+            withAttributes: openingValueAttrs
+        )
+
+        // Closing (right-aligned)
+        let closingValue = CurrencyFormatter.shared.format(closing)
+        let closingSize = closingValue.size(withAttributes: closingValueAttrs)
+        let closingLabelText = "Closing"
+        let closingLabelSize = closingLabelText.size(withAttributes: smallLabel)
+        closingLabelText.draw(
+            at: CGPoint(x: rect.maxX - 10 - closingLabelSize.width, y: rect.minY + 28),
+            withAttributes: smallLabel
+        )
+        closingValue.draw(
+            at: CGPoint(x: rect.maxX - 10 - closingSize.width, y: rect.minY + 10),
+            withAttributes: closingValueAttrs
+        )
+
+        // Arrow
+        let arrowAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.systemGray
+        ]
+        let arrow = "→"
+        let arrowSize = arrow.size(withAttributes: arrowAttrs)
+        arrow.draw(
+            at: CGPoint(x: rect.midX - arrowSize.width / 2, y: rect.minY + 16),
+            withAttributes: arrowAttrs
+        )
+    }
+
+    // MARK: Member statement — entries table
+
+    private func drawMemberEntriesTable(in pageRect: CGRect, at yStart: CGFloat,
+                                        entries: [MemberStatementSnapshot.Entry]) -> CGFloat {
+        let leftMargin: CGFloat = 40
+        let widths: [CGFloat] = [80, 110, 230, 110]  // date, kind, detail, amount
+        let headers = ["Date", "Type", "Detail", "Amount"]
+        var y = drawTableHeader(headers, widths: widths, at: yStart, leftMargin: leftMargin)
+
+        if entries.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10, weight: .regular),
                 .foregroundColor: NSColor.darkGray
             ]
-            moreText.draw(at: CGPoint(x: leftMargin + 10, y: currentY - 12), withAttributes: moreAttributes)
-            currentY -= 20
+            "No activity in the period.".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: attrs)
+            return y - 22
         }
 
-        return currentY
-    }
-
-    private func drawMemberLoansGroup(memberName: String, loans: [LoanSnapshot], width: CGFloat, at point: CGPoint) -> CGFloat {
-        var currentY = point.y
-
-        // Member name header
-        let memberNameAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-            .foregroundColor: NSColor.black
-        ]
-
-        // Calculate total balance for this member
-        let totalBalance = loans.reduce(0) { $0 + $1.balance }
-        let memberText = "\(memberName) (\(loans.count) loan\(loans.count == 1 ? "" : "s") - Total: \(CurrencyFormatter.shared.format(totalBalance)))"
-        memberText.draw(at: CGPoint(x: point.x, y: currentY - 12), withAttributes: memberNameAttributes)
-        currentY -= 28  // Increased spacing after member header
-
-        // Draw each loan for this member (indented)
-        for loan in loans {
-            currentY = drawLoanItem(loan: loan, width: width, at: CGPoint(x: point.x + 15, y: currentY), showMemberName: false)
-            currentY -= 6  // Increased spacing between loans
-        }
-
-        return currentY
-    }
-
-    private func drawLoanItem(loan: LoanSnapshot, width: CGFloat, at point: CGPoint, showMemberName: Bool = true) -> CGFloat {
-        let percentage = loan.amount > 0 ? ((loan.amount - loan.balance) / loan.amount) * 100 : 0
-
-        // Loan details line
-        let detailAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9),
-            .foregroundColor: NSColor.darkGray
-        ]
-
-        var loanText = ""
-        if showMemberName {
-            loanText = "\(loan.memberName): "
-        }
-
-        // Add issue date and due date for context
-        let dueDateStr = loan.dueDate != nil ? DateFormatter.shortDate.string(from: loan.dueDate!) : "N/A"
-
-        loanText += "\(CurrencyFormatter.shared.format(loan.amount)) → Balance: \(CurrencyFormatter.shared.format(loan.balance)) (Due: \(dueDateStr))"
-
-        // Check if loan was overridden
-        if loan.wasOverridden {
-            loanText += " ⚠️"
-        }
-
-        loanText.draw(at: point, withAttributes: detailAttributes)
-
-        // Progress bar - positioned to the right
-        let progressX = point.x + 300
-        let progressWidth: CGFloat = 80
-        let progressHeight: CGFloat = 8
-        let progressY = point.y - 2
-
-        let context = NSGraphicsContext.current?.cgContext
-
-        // Save the outermost state for the entire progress bar drawing
-        context?.saveGState()
-
-        // Progress background
-        let bgPath = NSBezierPath(roundedRect: CGRect(x: progressX, y: progressY, width: progressWidth, height: progressHeight),
-                                 xRadius: 5, yRadius: 5)
-        context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.2).cgColor)
-        bgPath.fill()
-
-        // Progress fill with gradient
-        let progressFillWidth = progressWidth * CGFloat(percentage / 100)
-        if progressFillWidth > 0 {
-            let progressRect = CGRect(x: progressX, y: progressY,
-                                     width: progressFillWidth,
-                                     height: progressHeight)
-            let progressPath = NSBezierPath(roundedRect: progressRect, xRadius: 5, yRadius: 5)
-
-            // Create gradient using Core Graphics — use nested save/restore to isolate the clip
-            context?.saveGState()
-            progressPath.addClip()
-
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let colors = [NSColor.systemGreen.withAlphaComponent(0.6).cgColor,
-                          NSColor.systemGreen.cgColor] as CFArray
-            let locations: [CGFloat] = [0.0, 1.0]
-
-            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations) {
-                let startPoint = CGPoint(x: progressX, y: progressY + progressHeight/2)
-                let endPoint = CGPoint(x: progressX + progressFillWidth, y: progressY + progressHeight/2)
-                context?.drawLinearGradient(gradient, start: startPoint, end: endPoint, options: [])
+        for (index, entry) in entries.enumerated() {
+            if index % 2 == 1 {
+                let cg = NSGraphicsContext.current?.cgContext
+                cg?.saveGState()
+                cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.05).cgColor)
+                cg?.fill(CGRect(x: leftMargin - 4, y: y - 18, width: widths.reduce(0, +) + 8, height: 18))
+                cg?.restoreGState()
             }
-            context?.restoreGState()  // Restores clip from addClip()
-        }
-
-        // Border — drawn after restoring clip so it renders on the full background
-        context?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.3).cgColor)
-        context?.setLineWidth(0.5)
-        bgPath.stroke()
-
-        // Restore outermost state
-        context?.restoreGState()
-
-        // Percentage text
-        let percentAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 8, weight: .medium),
-            .foregroundColor: NSColor.black
-        ]
-        let percentText = String(format: "%.0f%%", percentage)
-        percentText.draw(at: CGPoint(x: progressX + progressWidth + 5, y: point.y - 2), withAttributes: percentAttributes)
-
-        // Sub-line: last payment status. Indented under the loan line so
-        // each member's repayment cadence is visible at a glance on the
-        // monthly send.
-        let subAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 8),
-            .foregroundColor: NSColor.darkGray
-        ]
-        let subText: String
-        if let lastDate = loan.lastPaymentDate {
-            let dateStr = DateFormatter.shortDate.string(from: lastDate)
-            subText = "Last paid: \(CurrencyFormatter.shared.format(loan.lastPaymentAmount)) on \(dateStr)  •  \(loan.paymentCount) payment\(loan.paymentCount == 1 ? "" : "s") to date"
-        } else {
-            subText = "No payments recorded yet"
-        }
-        subText.draw(at: CGPoint(x: point.x + 10, y: point.y - 14), withAttributes: subAttrs)
-
-        return point.y - 26  // Original loan line + one sub-line
-    }
-
-    private func drawMemberSummaryTable(activeMembers: [MemberSnapshot], in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
-        var currentY = yPosition
-        let leftMargin: CGFloat = 40
-        let rightMargin: CGFloat = 40
-        let tableWidth = pageRect.width - leftMargin - rightMargin
-
-        // Section background
-        let context = NSGraphicsContext.current?.cgContext
-        context?.saveGState()
-        let sectionHeight: CGFloat = 300 // Approximate height
-        let sectionRect = CGRect(x: leftMargin - 10, y: currentY - sectionHeight, width: tableWidth + 20, height: sectionHeight)
-        context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.03).cgColor)
-        let sectionPath = NSBezierPath(roundedRect: sectionRect, xRadius: 8, yRadius: 8)
-        sectionPath.fill()
-        context?.restoreGState()
-
-        // Section title with trophy emoji
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: NSColor.black
-        ]
-        "🏆 Savings Leaderboard".draw(at: CGPoint(x: leftMargin, y: currentY - 15), withAttributes: titleAttributes)
-        currentY -= 30
-
-        // Table setup with rank column
-        let columnWidths: [CGFloat] = [40, 200, 120, 120]
-        let headers = ["Rank", "Name", "Total Saved", "Active Loan"]
-
-        // Draw table header with background
-        currentY = drawEnhancedTableHeader(headers, widths: columnWidths, at: currentY, leftMargin: leftMargin)
-        currentY -= 2
-
-        // Sort members by total contributions (highest first), then by loan status (no loans ranked higher)
-        let sortedMembers = activeMembers.sorted { member1, member2 in
-            if member1.totalContributions != member2.totalContributions {
-                return member1.totalContributions > member2.totalContributions
-            }
-            return member1.totalActiveLoanBalance < member2.totalActiveLoanBalance
-        }
-        var totalContributions: Double = 0
-        var totalLoans: Double = 0
-        var rowIndex = 0
-
-        for (index, member) in sortedMembers.enumerated() {
-            // Determine rank display
-            let rankDisplay: String
-            if index == 0 {
-                rankDisplay = "🥇"
-            } else if index == 1 {
-                rankDisplay = "🥈"
-            } else if index == 2 {
-                rankDisplay = "🥉"
-            } else {
-                rankDisplay = "\(index + 1)"
-            }
-
-            // Add crown emoji for top saver
-            let nameDisplay = index == 0 ? "👑 \(member.name)" : member.name
-
+            let amount = entry.signedAmount
+            let amountStr = (amount >= 0 ? "+" : "-") + CurrencyFormatter.shared.format(abs(amount))
             let values = [
-                rankDisplay,
-                nameDisplay,
-                CurrencyFormatter.shared.format(member.totalContributions),
-                CurrencyFormatter.shared.format(member.totalActiveLoanBalance)
+                DateFormatter.shortDate.string(from: entry.date),
+                entry.kind,
+                entry.detail,
+                amountStr
             ]
-
-            // Special highlighting for top 3 savers
-            if index == 0 {
-                // Gold background for top saver
-                context?.saveGState()
-                context?.setFillColor(NSColor.systemYellow.withAlphaComponent(0.15).cgColor)
-                context?.fill(CGRect(x: leftMargin - 5, y: currentY - 20, width: columnWidths.reduce(0, +) + 10, height: 20))
-                context?.restoreGState()
-            } else if index < 3 {
-                // Light background for 2nd and 3rd place
-                context?.saveGState()
-                context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.1).cgColor)
-                context?.fill(CGRect(x: leftMargin - 5, y: currentY - 20, width: columnWidths.reduce(0, +) + 10, height: 20))
-                context?.restoreGState()
-            } else if rowIndex % 2 == 1 {
-                // Regular alternating rows
-                context?.saveGState()
-                context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.05).cgColor)
-                context?.fill(CGRect(x: leftMargin - 5, y: currentY - 20, width: columnWidths.reduce(0, +) + 10, height: 20))
-                context?.restoreGState()
-            }
-
-            // Draw subtle row separator (horizontal line)
-            context?.saveGState()
-            context?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.15).cgColor)
-            context?.setLineWidth(0.5)
-            context?.move(to: CGPoint(x: leftMargin, y: currentY - 20))
-            context?.addLine(to: CGPoint(x: leftMargin + columnWidths.reduce(0, +), y: currentY - 20))
-            context?.strokePath()
-            context?.restoreGState()
-
-            // Draw vertical column separators
-            context?.saveGState()
-            context?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.1).cgColor)
-            context?.setLineWidth(0.5)
-            var xPos = leftMargin
-            for (colIndex, width) in columnWidths.enumerated() {
-                if colIndex < columnWidths.count - 1 {  // Don't draw after last column
-                    xPos += width
-                    context?.move(to: CGPoint(x: xPos, y: currentY))
-                    context?.addLine(to: CGPoint(x: xPos, y: currentY - 20))
-                }
-            }
-            context?.strokePath()
-            context?.restoreGState()
-
-            drawEnhancedTableRow(values, widths: columnWidths, at: currentY, leftMargin: leftMargin,
-                               isNegative: member.availableContributions < 0)
-
-            totalContributions += member.totalContributions
-            totalLoans += member.totalActiveLoanBalance
-
-            currentY -= 20
-            rowIndex += 1
+            drawTableRow(values, widths: widths, at: y, leftMargin: leftMargin, bold: false,
+                         coloredColumn: 3, color: amount >= 0 ? NSColor.systemGreen : NSColor.black)
+            y -= 18
         }
 
-        // Draw totals row with emphasis
-        currentY -= 5
-
-        // Totals background
-        context?.saveGState()
-        context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.1).cgColor)
-        context?.fill(CGRect(x: leftMargin - 5, y: currentY - 22, width: columnWidths.reduce(0, +) + 10, height: 24))
-        context?.restoreGState()
-
-        // Top border for totals
-        context?.saveGState()
-        context?.setStrokeColor(NSColor.systemGray.cgColor)
-        context?.setLineWidth(1.5)
-        context?.move(to: CGPoint(x: leftMargin, y: currentY + 2))
-        context?.addLine(to: CGPoint(x: leftMargin + columnWidths.reduce(0, +), y: currentY + 2))
-        context?.strokePath()
-        context?.restoreGState()
-
-        currentY -= 3
-        let totalValues = [
-            "",  // Empty rank column
-            "TOTALS",
-            CurrencyFormatter.shared.format(totalContributions),
-            CurrencyFormatter.shared.format(totalLoans)
-        ]
-        drawEnhancedTableRow(totalValues, widths: columnWidths, at: currentY, leftMargin: leftMargin,
-                           isBold: true, isNegative: false)
-
-        return currentY - 25
+        return y
     }
 
-    private func drawEnhancedTableHeader(_ headers: [String], widths: [CGFloat], at yPosition: CGFloat, leftMargin: CGFloat) -> CGFloat {
-        let context = NSGraphicsContext.current?.cgContext
-
-        // Header background
-        context?.saveGState()
-        context?.setFillColor(NSColor.systemGray.withAlphaComponent(0.1).cgColor)
-        let headerRect = CGRect(x: leftMargin - 5, y: yPosition - 20, width: widths.reduce(0, +) + 10, height: 20)
-        context?.fill(headerRect)
-        context?.restoreGState()
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-            .foregroundColor: NSColor.black
-        ]
-
-        var xPosition = leftMargin
-        for (index, header) in headers.enumerated() {
-            let rect = CGRect(x: xPosition, y: yPosition - 16, width: widths[index], height: 15)
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = index == 0 ? .left : .right
-
-            var attrs = attributes
-            attrs[.paragraphStyle] = paragraph
-
-            header.draw(in: rect, withAttributes: attrs)
-            xPosition += widths[index]
-        }
-
-        // Draw bottom border
-        context?.saveGState()
-        context?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.3).cgColor)
-        context?.setLineWidth(1)
-        context?.move(to: CGPoint(x: leftMargin, y: yPosition - 20))
-        context?.addLine(to: CGPoint(x: leftMargin + widths.reduce(0, +), y: yPosition - 20))
-        context?.strokePath()
-        context?.restoreGState()
-
-        return yPosition - 22
-    }
-
-    private func drawEnhancedTableRow(_ values: [String], widths: [CGFloat], at yPosition: CGFloat,
-                                     leftMargin: CGFloat, isBold: Bool = false, isNegative: Bool = false) {
-        let weight: NSFont.Weight = isBold ? .medium : .regular
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: weight),
-            .foregroundColor: NSColor.black
-        ]
-
-        var xPosition = leftMargin
-        for (index, value) in values.enumerated() {
-            let rect = CGRect(x: xPosition, y: yPosition - 12, width: widths[index], height: 12)
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = index == 0 ? .left : .right
-
-            var attrs = attributes
-            attrs[.paragraphStyle] = paragraph
-
-            // Color negative available balances
-            if index == 3 && isNegative && value.contains("-") {
-                attrs[.foregroundColor] = NSColor.systemRed
-            }
-
-            value.draw(in: rect, withAttributes: attrs)
-            xPosition += widths[index]
-        }
-    }
-
-    private func drawTableHeader(_ headers: [String], widths: [CGFloat], at yPosition: CGFloat, in pageRect: CGRect) {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 11),
-            .foregroundColor: NSColor.black
-        ]
-
-        var xPosition: CGFloat = 70
-        for (index, header) in headers.enumerated() {
-            let rect = CGRect(x: xPosition, y: yPosition - 15, width: widths[index], height: 15)
-            header.draw(in: rect, withAttributes: attributes)
-            xPosition += widths[index]
-        }
-
-        // Draw underline
-        let context = NSGraphicsContext.current?.cgContext
-        context?.setStrokeColor(NSColor.black.cgColor)
-        context?.setLineWidth(0.5)
-        context?.move(to: CGPoint(x: 70, y: yPosition - 17))
-        context?.addLine(to: CGPoint(x: 70 + widths.reduce(0, +), y: yPosition - 17))
-        context?.strokePath()
-    }
-
-    private func drawTableRow(_ values: [String], widths: [CGFloat], at yPosition: CGFloat, in pageRect: CGRect) {
-        let attributes: [NSAttributedString.Key: Any] = [
+    private func drawActiveLoanFooter(in pageRect: CGRect, at y: CGFloat,
+                                      loans: [MemberStatementSnapshot.ActiveLoan]) -> CGFloat {
+        var currentY = y
+        let leftMargin: CGFloat = 40
+        let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.darkGray
         ]
-
-        var xPosition: CGFloat = 70
-        for (index, value) in values.enumerated() {
-            let rect = CGRect(x: xPosition, y: yPosition - 12, width: widths[index], height: 12)
-            value.draw(in: rect, withAttributes: attributes)
-            xPosition += widths[index]
+        for loan in loans {
+            let dueText: String = {
+                guard let d = loan.nextDueDate else { return "" }
+                return " • Next payment due \(DateFormatter.fullDate.string(from: d))"
+            }()
+            let line = "Active loan: \(CurrencyFormatter.shared.format(loan.balance)) outstanding (originally \(CurrencyFormatter.shared.format(loan.originalAmount))) • Monthly payment \(CurrencyFormatter.shared.format(loan.monthlyPayment))\(dueText)"
+            line.draw(at: CGPoint(x: leftMargin, y: currentY - 12), withAttributes: attrs)
+            currentY -= 16
         }
+        return currentY
     }
 
-    // MARK: - Helper Methods
+    // MARK: Generic table primitives
 
-    private func drawSectionTitle(_ title: String, at yPosition: CGFloat, in pageRect: CGRect) -> CGFloat {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 16),
-            .foregroundColor: NSColor.black
-        ]
+    @discardableResult
+    private func drawTableHeader(_ headers: [String], widths: [CGFloat],
+                                 at y: CGFloat, leftMargin: CGFloat) -> CGFloat {
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.12).cgColor)
+        cg?.fill(CGRect(x: leftMargin - 4, y: y - 18, width: widths.reduce(0, +) + 8, height: 18))
+        cg?.restoreGState()
 
-        let size = title.size(withAttributes: attributes)
-        let rect = CGRect(x: 50, y: yPosition - size.height, width: size.width, height: size.height)
-        title.draw(in: rect, withAttributes: attributes)
-
-        return yPosition - size.height - 10
-    }
-
-    private func drawKeyValue(_ key: String, value: String, at yPosition: CGFloat, in pageRect: CGRect) -> CGFloat {
-        let keyAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12),
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
             .foregroundColor: NSColor.darkGray
         ]
 
-        let valueAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12),
+        var x = leftMargin
+        for (index, header) in headers.enumerated() {
+            let para = NSMutableParagraphStyle()
+            para.alignment = (index == 0 || index == 1) ? .left : .right
+            var rowAttrs = attrs
+            rowAttrs[.paragraphStyle] = para
+            let rect = CGRect(x: x, y: y - 14, width: widths[index] - 4, height: 14)
+            header.draw(in: rect, withAttributes: rowAttrs)
+            x += widths[index]
+        }
+
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.30).cgColor)
+        cg?.setLineWidth(0.5)
+        cg?.move(to: CGPoint(x: leftMargin, y: y - 18))
+        cg?.addLine(to: CGPoint(x: leftMargin + widths.reduce(0, +), y: y - 18))
+        cg?.strokePath()
+        cg?.restoreGState()
+
+        return y - 20
+    }
+
+    private func drawTableRow(_ values: [String], widths: [CGFloat],
+                              at y: CGFloat, leftMargin: CGFloat, bold: Bool,
+                              coloredColumn: Int? = nil, color: NSColor = .black) {
+        let baseAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: bold ? .semibold : .regular),
             .foregroundColor: NSColor.black
         ]
 
-        let keySize = key.size(withAttributes: keyAttributes)
-        let keyRect = CGRect(x: 70, y: yPosition - keySize.height, width: 150, height: keySize.height)
-        key.draw(in: keyRect, withAttributes: keyAttributes)
-
-        let valueRect = CGRect(x: 230, y: yPosition - keySize.height, width: pageRect.width - 280, height: keySize.height)
-        value.draw(in: valueRect, withAttributes: valueAttributes)
-
-        return yPosition - keySize.height - 8
-    }
-}
-
-// MARK: - PDF Error
-
-enum PDFError: LocalizedError {
-    case contextCreationFailed
-    case documentCreationFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .contextCreationFailed:
-            return "Failed to create PDF graphics context"
-        case .documentCreationFailed:
-            return "Failed to create PDF document"
+        var x = leftMargin
+        for (index, value) in values.enumerated() {
+            let para = NSMutableParagraphStyle()
+            para.alignment = (index == 0 || index == 1) ? .left : .right
+            para.lineBreakMode = .byTruncatingTail
+            var attrs = baseAttrs
+            attrs[.paragraphStyle] = para
+            if index == coloredColumn { attrs[.foregroundColor] = color }
+            let rect = CGRect(x: x, y: y - 14, width: widths[index] - 4, height: 14)
+            value.draw(in: rect, withAttributes: attrs)
+            x += widths[index]
         }
     }
 }
 
-// MARK: - Helper Extensions
+// MARK: - Helpers
 
 extension DateFormatter {
-    static let mediumDate: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        return formatter
+    static let fullDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .long
+        return f
     }()
-
     static let shortDate: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd/MM/yy"
-        return formatter
+        let f = DateFormatter()
+        f.dateFormat = "dd MMM yy"
+        return f
+    }()
+    static let shortMonth: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM yy"
+        return f
+    }()
+    static let mediumDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        return f
     }()
 }
 

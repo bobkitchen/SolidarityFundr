@@ -2,14 +2,18 @@
 //  ReportsView.swift
 //  SolidarityFundr
 //
-//  Created on 7/19/25.
-//  macOS 26 Tahoe HIG Compliant
+//  Two reports, one screen:
+//    1. Monthly Statement — fund-wide compiled statement for a chosen
+//       month (the document Bob shares with the household each month).
+//    2. Member Statement — the same scope, narrowed to a single member.
+//
+//  Both are period-bounded by a single Month picker. PDFs render via
+//  PDFGenerator and open in Preview for the user to print or share.
 //
 
 import SwiftUI
-import Charts
-import UniformTypeIdentifiers
 import PDFKit
+import UniformTypeIdentifiers
 
 #if !os(macOS)
 // Reports rely on the AppKit-only PDF drawing pipeline. iPhone shows
@@ -19,7 +23,7 @@ struct ReportsView: View {
         ContentUnavailableView(
             "Reports are available on Mac",
             systemImage: "doc.text",
-            description: Text("Open the fund on your Mac to generate and share PDF reports.")
+            description: Text("Open the fund on your Mac to generate and share PDF statements.")
         )
     }
 }
@@ -27,1595 +31,680 @@ struct ReportsView: View {
 
 struct ReportsView: View {
     @EnvironmentObject var dataManager: DataManager
-    @State private var selectedReportType = ReportType.fundOverview
+
+    @State private var selectedReportType: ReportType = .monthlyStatement
+    @State private var selectedMonth: StatementMonth = .current
     @State private var selectedMember: Member?
-    @State private var startDate = Calendar.current.date(byAdding: .month, value: -3, to: Date())!
-    @State private var endDate = Date()
-    @State private var pdfURL: URL?
     @State private var isGeneratingPDF = false
-    @State private var showingError = false
-    @State private var errorMessage = ""
-    @State private var hasRecalculated = false
-    
-    enum ReportType: String, CaseIterable {
-        case fundOverview = "Fund Overview"
+    @State private var errorMessage: String?
+
+    enum ReportType: String, CaseIterable, Identifiable {
+        case monthlyStatement = "Monthly Statement"
         case memberStatement = "Member Statement"
-        case loanSummary = "Loan Summary"
-        case monthlyReport = "Monthly Report"
-        case analytics = "Analytics"
-        case fundSummary = "Fund Summary Report"
-        
+
+        var id: String { rawValue }
+
         var icon: String {
             switch self {
-            case .fundOverview: return "chart.pie.fill"
+            case .monthlyStatement: return "doc.text.image.fill"
             case .memberStatement: return "person.text.rectangle.fill"
-            case .loanSummary: return "creditcard.fill"
-            case .monthlyReport: return "calendar"
-            case .analytics: return "chart.xyaxis.line"
-            case .fundSummary: return "doc.text.image.fill"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .monthlyStatement: return "Fund-wide statement for the month"
+            case .memberStatement: return "Statement for a single member"
             }
         }
     }
-    
+
     var body: some View {
-        NavigationStack {
-            Group {
-                VStack(spacing: 0) {
-                    reportHeader
-                    reportTypeSelector
+        VStack(spacing: 0) {
+            reportTypePicker
+            Divider()
+            monthRow
+            Divider()
 
-                    if selectedReportType != .fundOverview {
-                        dateRangeSelector
-                    }
-
-                    ScrollView {
-                        switch selectedReportType {
-                        case .fundOverview:
-                            FundOverviewReport()
-                        case .memberStatement:
-                            MemberStatementReport(selectedMember: $selectedMember)
-                        case .loanSummary:
-                            LoanSummaryReport(startDate: startDate, endDate: endDate)
-                        case .monthlyReport:
-                            MonthlyReport(startDate: startDate, endDate: endDate)
-                        case .analytics:
-                            AnalyticsReport()
-                        case .fundSummary:
-                            FundSummaryReport()
-                        }
-                    }
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Reports view")
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(NSColor.windowBackgroundColor))
-            .navigationTitle("Reports")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        generatePDF()
-                    } label: {
-                        if isGeneratingPDF {
-                            ProgressView().controlSize(.small)
+            ScrollView {
+                VStack(spacing: 20) {
+                    switch selectedReportType {
+                    case .monthlyStatement:
+                        MonthlyStatementPreview(
+                            month: selectedMonth,
+                            isGenerating: $isGeneratingPDF,
+                            onGenerate: generateMonthlyPDF
+                        )
+                    case .memberStatement:
+                        if let member = selectedMember {
+                            MemberStatementPreview(
+                                member: member,
+                                month: selectedMonth,
+                                isGenerating: $isGeneratingPDF,
+                                onBack: { selectedMember = nil },
+                                onGenerate: { generateMemberPDF(for: member) }
+                            )
                         } else {
-                            Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
+                            MemberPicker(selectedMember: $selectedMember)
                         }
                     }
-                    .disabled(isGeneratingPDF)
                 }
-            }
-            .alert("Export Error", isPresented: $showingError) {
-                Button("OK") {}
-            } message: {
-                Text(errorMessage)
-            }
-            .onAppear {
-                if !hasRecalculated {
-                    dataManager.recalculateAllMemberContributions()
-                    hasRecalculated = true
-                }
+                .padding(20)
             }
         }
-    }
-    
-    // MARK: - View Components
-    
-    private var reportHeader: some View {
-        EmptyView()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
+        .navigationTitle("Reports")
+        .alert(
+            "Could not generate PDF",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
-    private var reportTypeSelector: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(ReportType.allCases, id: \.self) { type in
-                    ReportTypeButton(
-                        reportType: type,
-                        isSelected: selectedReportType == type,
-                        action: { selectedReportType = type }
-                    )
+    // MARK: Report-type picker
+
+    private var reportTypePicker: some View {
+        HStack(spacing: 12) {
+            ForEach(ReportType.allCases) { type in
+                ReportTypeChip(
+                    reportType: type,
+                    isSelected: selectedReportType == type
+                ) {
+                    selectedReportType = type
+                    if type == .monthlyStatement {
+                        selectedMember = nil
+                    }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-        }
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
-    }
-    
-    private var dateRangeSelector: some View {
-        HStack(spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "calendar")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                
-                DatePicker("From", selection: $startDate, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .labelsHidden()
-                
-                Text("–")
-                    .foregroundStyle(.secondary)
-                
-                DatePicker("To", selection: $endDate, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .labelsHidden()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            
             Spacer()
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+        .padding(.vertical, 14)
     }
-    
-    // MARK: - PDF Generation
-    
-    private func generatePDF() {
+
+    // MARK: Month picker row
+
+    private var monthRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar")
+                .foregroundStyle(.secondary)
+
+            MonthPicker(selection: $selectedMonth)
+
+            Spacer()
+
+            // Quick previous/next buttons make month-stepping feel right
+            // for a workflow that is mostly "this month minus one".
+            HStack(spacing: 6) {
+                Button { stepMonth(-1) } label: {
+                    Image(systemName: "chevron.left")
+                }
+                Button { stepMonth(1) } label: {
+                    Image(systemName: "chevron.right")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(selectedMonth == .current && false) // future months allowed; keep both arrows live
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    private func stepMonth(_ delta: Int) {
+        let cal = Calendar.current
+        let date = selectedMonth.startDate
+        guard let stepped = cal.date(byAdding: .month, value: delta, to: date) else { return }
+        let comps = cal.dateComponents([.year, .month], from: stepped)
+        selectedMonth = StatementMonth(year: comps.year!, month: comps.month!)
+    }
+
+    // MARK: PDF generation
+
+    private func generateMonthlyPDF() {
+        runPDFGeneration { generator in
+            try await generator.generateMonthlyStatement(
+                month: selectedMonth,
+                dataManager: dataManager
+            )
+        }
+    }
+
+    private func generateMemberPDF(for member: Member) {
+        runPDFGeneration { generator in
+            try await generator.generateMemberStatement(
+                member: member,
+                month: selectedMonth,
+                dataManager: dataManager
+            )
+        }
+    }
+
+    private func runPDFGeneration(_ work: @escaping (PDFGenerator) async throws -> URL) {
+        guard !isGeneratingPDF else { return }
         isGeneratingPDF = true
-        
         Task {
             do {
-                let pdfGenerator = PDFGenerator()
-                let url = try await pdfGenerator.generateReport(
-                    type: selectedReportType,
-                    dataManager: dataManager,
-                    member: selectedMember,
-                    startDate: startDate,
-                    endDate: endDate
-                )
-                
+                let url = try await work(PDFGenerator())
                 await MainActor.run {
-                    self.pdfURL = url
-                    self.isGeneratingPDF = false
-                    self.showPrintDialog(for: url)
-                }
-            } catch {
-                print("PDF generation error: \(error)")
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.showingError = true
-                    self.isGeneratingPDF = false
-                }
-            }
-        }
-    }
-    
-    // MARK: - Print Dialog
-    
-    private func showPrintDialog(for url: URL) {
-        // Simply open the PDF in Preview, which handles printing and saving properly
-        NSWorkspace.shared.open(url)
-        
-        // Clean up temporary file after a delay (give Preview time to open it)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-            try? FileManager.default.removeItem(at: url)
-            self.pdfURL = nil
-        }
-    }
-}
-
-// MARK: - Fund Overview Report
-
-struct FundOverviewReport: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var fundSummary: FundSummary {
-        FundCalculator.shared.generateFundSummary()
-    }
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Fund Balance Card
-            FundBalanceCard(fundSummary: fundSummary)
-            
-            // Key Metrics
-            HStack(spacing: 16) {
-                ReportMetricCard(
-                    title: "Active Members",
-                    value: "\(fundSummary.activeMembers)",
-                    icon: "person.3.fill",
-                    color: .blue
-                )
-                
-                ReportMetricCard(
-                    title: "Active Loans",
-                    value: "\(fundSummary.activeLoansCount)",
-                    icon: "creditcard.fill",
-                    color: .orange
-                )
-            }
-            
-            // Utilization Chart
-            UtilizationChart(utilization: fundSummary.utilizationPercentage)
-            
-            // Fund Composition
-            FundCompositionChart(fundSummary: fundSummary)
-            
-            // Recent Activity
-            RecentActivitySection()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Member Statement Report
-
-struct MemberStatementReport: View {
-    @EnvironmentObject var dataManager: DataManager
-    @Binding var selectedMember: Member?
-    
-    @State private var pdfURL: URL?
-    @State private var isGeneratingPDF = false
-    @State private var showingError = false
-    @State private var errorMessage = ""
-    @State private var statementPeriodStart = Calendar.current.date(byAdding: .month, value: -1, to: Date())!
-    @State private var statementPeriodEnd = Date()
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Member Selector
-            if selectedMember == nil {
-                MemberSelector(selectedMember: $selectedMember)
-            } else if let member = selectedMember {
-                // Back button and Member Info
-                HStack {
-                    Button {
-                        selectedMember = nil
-                        pdfURL = nil
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("Select Member")
-                        }
-                        .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Spacer()
-                }
-                
-                // Member Info
-                MemberInfoCard(member: member)
-
-                // Statement Actions
-                MemberStatementActions(
-                    member: member,
-                    pdfURL: $pdfURL,
-                    isGeneratingPDF: $isGeneratingPDF,
-                    statementPeriodStart: $statementPeriodStart,
-                    statementPeriodEnd: $statementPeriodEnd
-                )
-                
-                // Financial Summary
-                MemberFinancialSummary(member: member)
-                
-                // Contribution History
-                ContributionHistoryChart(member: member)
-                
-                // Loan History
-                MemberLoanHistory(member: member)
-                
-                // Recent Transactions
-                MemberTransactionHistory(member: member)
-            }
-        }
-        .padding()
-        .alert("Error", isPresented: $showingError) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage)
-        }
-    }
-}
-
-// MARK: - Supporting Views
-
-struct MemberStatementActions: View {
-    let member: Member
-    @Binding var pdfURL: URL?
-    @Binding var isGeneratingPDF: Bool
-    @Binding var statementPeriodStart: Date
-    @Binding var statementPeriodEnd: Date
-    @EnvironmentObject var dataManager: DataManager
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Statement Actions", systemImage: "doc.text.fill")
-                    .font(.headline)
-
-                Spacer()
-
-                HStack(spacing: 8) {
-                    DatePicker("From", selection: $statementPeriodStart, displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
-
-                    Text("–")
-                        .foregroundStyle(.secondary)
-
-                    DatePicker("To", selection: $statementPeriodEnd, displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-
-            Button {
-                generateAndPreviewPDF()
-            } label: {
-                HStack {
-                    if isGeneratingPDF {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "doc.text.magnifyingglass")
-                    }
-                    Text("Generate & Preview")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.accentColor)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .disabled(isGeneratingPDF)
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func generateAndPreviewPDF() {
-        isGeneratingPDF = true
-
-        Task {
-            do {
-                let pdfGenerator = PDFGenerator()
-                let url = try await pdfGenerator.generateReport(
-                    type: .memberStatement,
-                    dataManager: dataManager,
-                    member: member,
-                    startDate: statementPeriodStart,
-                    endDate: statementPeriodEnd
-                )
-
-                await MainActor.run {
-                    self.pdfURL = url
-                    self.isGeneratingPDF = false
+                    isGeneratingPDF = false
                     NSWorkspace.shared.open(url)
+                    // Let Preview pick it up before we delete the temp file.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        try? FileManager.default.removeItem(at: url)
+                    }
                 }
             } catch {
-                print("PDF generation error: \(error)")
                 await MainActor.run {
-                    self.isGeneratingPDF = false
+                    isGeneratingPDF = false
+                    errorMessage = error.localizedDescription
                 }
             }
         }
     }
 }
 
-struct FundBalanceCard: View {
-    let fundSummary: FundSummary
-    
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Fund Balance")
-                .font(.headline)
-            
-            Text(CurrencyFormatter.shared.format(fundSummary.fundBalance))
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            
-            HStack(spacing: 40) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Contributions", systemImage: "plus.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                    Text(CurrencyFormatter.shared.format(fundSummary.totalContributions))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-                
-                VStack(alignment: .trailing, spacing: 4) {
-                    Label("Active Loans", systemImage: "minus.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    Text(CurrencyFormatter.shared.format(fundSummary.totalActiveLoans))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
+// MARK: - Report-type chip
 
-struct ReportMetricCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                Spacer()
-            }
-            
-            Text(value)
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct UtilizationChart: View {
-    let utilization: Double
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Fund Utilization")
-                .font(.headline)
-            
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.3))
-                        .frame(height: 30)
-                    
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(utilizationColor)
-                        .frame(width: geometry.size.width * utilization, height: 30)
-                    
-                    Text(String(format: "%.1f%%", utilization * 100))
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                }
-            }
-            .frame(height: 30)
-            
-            HStack {
-                Text("Warning threshold: 60%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Circle()
-                    .fill(utilizationColor)
-                    .frame(width: 8, height: 8)
-                Text(utilizationStatus)
-                    .font(.caption)
-                    .foregroundStyle(utilizationColor)
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-    
-    private var utilizationColor: Color {
-        if utilization >= 0.6 {
-            return .red
-        } else if utilization >= 0.4 {
-            return .orange
-        } else {
-            return .green
-        }
-    }
-    
-    private var utilizationStatus: String {
-        if utilization >= 0.6 {
-            return "High"
-        } else if utilization >= 0.4 {
-            return "Moderate"
-        } else {
-            return "Low"
-        }
-    }
-}
-
-struct FundCompositionChart: View {
-    let fundSummary: FundSummary
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Fund Composition")
-                .font(.headline)
-            
-            Chart {
-                SectorMark(
-                    angle: .value("Amount", fundSummary.totalContributions),
-                    innerRadius: .ratio(0.5)
-                )
-                .foregroundStyle(.blue)
-                .annotation(position: .overlay) {
-                    Text("Contributions")
-                        .font(.caption)
-                }
-                
-                SectorMark(
-                    angle: .value("Amount", fundSummary.bobRemainingInvestment),
-                    innerRadius: .ratio(0.5)
-                )
-                .foregroundStyle(.green)
-                .annotation(position: .overlay) {
-                    Text("Bob's Investment")
-                        .font(.caption)
-                }
-                
-                SectorMark(
-                    angle: .value("Amount", fundSummary.totalInterestApplied),
-                    innerRadius: .ratio(0.5)
-                )
-                .foregroundStyle(.purple)
-                .annotation(position: .overlay) {
-                    Text("Interest")
-                        .font(.caption)
-                }
-            }
-            .frame(height: 200)
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct MemberSelector: View {
-    @EnvironmentObject var dataManager: DataManager
-    @Binding var selectedMember: Member?
-    @State private var filterOption: MemberFilterOption = .all
-    @State private var sortOption: MemberSortOption = .name
-    
-    enum MemberFilterOption: String, CaseIterable {
-        case all = "All Members"
-        case withActiveLoan = "With Active Loan"
-        case withoutActiveLoan = "Without Active Loan"
-
-        var icon: String {
-            switch self {
-            case .all: return "person.3"
-            case .withActiveLoan: return "creditcard.fill"
-            case .withoutActiveLoan: return "creditcard"
-            }
-        }
-    }
-
-    enum MemberSortOption: String, CaseIterable {
-        case name = "Name"
-        case role = "Role"
-    }
-
-    var filteredMembers: [Member] {
-        let members = dataManager.members.filter { member in
-            switch filterOption {
-            case .all:
-                return true
-            case .withActiveLoan:
-                return member.hasActiveLoans
-            case .withoutActiveLoan:
-                return !member.hasActiveLoans
-            }
-        }
-
-        return members.sorted { m1, m2 in
-            switch sortOption {
-            case .name:
-                return (m1.name ?? "") < (m2.name ?? "")
-            case .role:
-                return m1.memberRole.rawValue < m2.memberRole.rawValue
-            }
-        }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header with filters
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Select Member")
-                    .font(.headline)
-                
-                // Filter and Sort Controls
-                HStack {
-                    // Filter Menu
-                    Menu {
-                        ForEach(MemberFilterOption.allCases, id: \.self) { option in
-                            Button {
-                                filterOption = option
-                            } label: {
-                                Label(option.rawValue, systemImage: option.icon)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: filterOption.icon)
-                            Text(filterOption.rawValue)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                        }
-                        .font(.footnote)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    
-                    // Sort Menu
-                    Menu {
-                        ForEach(MemberSortOption.allCases, id: \.self) { option in
-                            Button {
-                                sortOption = option
-                            } label: {
-                                Text("Sort by \(option.rawValue)")
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.arrow.down")
-                            Text(sortOption.rawValue)
-                        }
-                        .font(.footnote)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    
-                    Spacer()
-                    
-                    // Member count
-                    Text("\(filteredMembers.count) members")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            // Member List
-            if filteredMembers.isEmpty {
-                VStack {
-                    Image(systemName: "person.slash")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("No members match filter")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 200)
-            } else {
-                ScrollView {
-                    ForEach(filteredMembers) { member in
-                        Button {
-                            selectedMember = member
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(member.name ?? "Unknown")
-                                        .fontWeight(.medium)
-
-                                    Text(member.memberRole.displayName)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                // Status Indicators
-                                VStack(alignment: .trailing, spacing: 4) {
-                                    if member.memberStatus != .active {
-                                        Text(member.memberStatus.rawValue.capitalized)
-                                            .font(.caption)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.red.opacity(0.2))
-                                            .foregroundStyle(.red)
-                                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                                    }
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(.secondary)
-                                        .font(.caption)
-                                }
-                            }
-                            .padding()
-                            .background(Color.secondary.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-
-struct LoanSummaryReport: View {
-    @EnvironmentObject var dataManager: DataManager
-    let startDate: Date
-    let endDate: Date
-    
-    /// Loans whose issueDate falls within the selected period.
-    /// Includes completed loans, since the user is asking "what was issued
-    /// in this window" — the report's "Total Loans Issued" metric only
-    /// makes sense with that interpretation.
-    var filteredLoans: [Loan] {
-        dataManager.allLoans.filter { loan in
-            guard let issued = loan.issueDate else { return false }
-            return issued >= startDate && issued <= endDate
-        }
-    }
-
-    var totalLoanAmount: Double {
-        filteredLoans.reduce(0) { $0 + $1.amount }
-    }
-
-    var totalOutstanding: Double {
-        filteredLoans.reduce(0) { $0 + $1.balance }
-    }
-
-    var overdueLoans: [Loan] {
-        filteredLoans.filter { $0.isOverdue }
-    }
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Summary Cards
-            HStack(spacing: 16) {
-                ReportMetricCard(
-                    title: "Total Loans Issued",
-                    value: CurrencyFormatter.shared.format(totalLoanAmount),
-                    icon: "creditcard.fill",
-                    color: .blue
-                )
-                
-                ReportMetricCard(
-                    title: "Outstanding Balance",
-                    value: CurrencyFormatter.shared.format(totalOutstanding),
-                    icon: "dollarsign.circle.fill",
-                    color: .orange
-                )
-            }
-            
-            HStack(spacing: 16) {
-                ReportMetricCard(
-                    title: "Number of Loans",
-                    value: "\(filteredLoans.count)",
-                    icon: "number.circle.fill",
-                    color: .purple
-                )
-                
-                ReportMetricCard(
-                    title: "Overdue Loans",
-                    value: "\(overdueLoans.count)",
-                    icon: "exclamationmark.triangle.fill",
-                    color: overdueLoans.isEmpty ? .green : .red
-                )
-            }
-            
-            // Loan List
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Loan Details")
-                    .font(.headline)
-                
-                if filteredLoans.isEmpty {
-                    Text("No loans found in selected period")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding()
-                } else {
-                    ForEach(filteredLoans) { loan in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(loan.member?.name ?? "Unknown")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("Issued \(DateHelper.formatDate(loan.issueDate))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            VStack(alignment: .trailing, spacing: 4) {
-                                Text(CurrencyFormatter.shared.format(loan.amount))
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                HStack(spacing: 4) {
-                                    Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    
-                                    if loan.isOverdue {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .font(.caption)
-                                            .foregroundStyle(.red)
-                                    }
-                                }
-                            }
-                        }
-                        .padding()
-                        .background(Color.secondary.opacity(0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                }
-            }
-            .padding()
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .padding()
-    }
-}
-
-struct MonthlyReport: View {
-    @EnvironmentObject var dataManager: DataManager
-    let startDate: Date
-    let endDate: Date
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Monthly Summary
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Monthly Summary")
-                    .font(.headline)
-                
-                Text("\(DateHelper.formatShortMonth(startDate)) - \(DateHelper.formatShortMonth(endDate))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Contribution Analysis
-            ContributionAnalysisCard()
-            
-            // Loan Activity
-            LoanActivityCard(startDate: startDate, endDate: endDate)
-            
-            // Member Activity
-            MemberActivityCard()
-        }
-        .padding()
-    }
-}
-
-struct ContributionAnalysisCard: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var monthlyTotals: [(month: String, amount: Double)] {
-        return ChartDataGenerator.shared.generateMonthlyContributionData(
-            months: 6,
-            context: PersistenceController.shared.container.viewContext
-        )
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Contribution Analysis")
-                .font(.headline)
-            
-            if monthlyTotals.isEmpty {
-                Text("No contribution data available")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
-            } else {
-                Chart(monthlyTotals, id: \.month) { item in
-                    BarMark(
-                        x: .value("Month", String(item.month.suffix(2))),
-                        y: .value("Amount", item.amount)
-                    )
-                    .foregroundStyle(.blue)
-                }
-                .frame(height: 200)
-                
-                HStack {
-                    let total = monthlyTotals.map { $0.amount }.reduce(0, +)
-                    let average = total / Double(max(1, monthlyTotals.count))
-                    Text("Average: \(CurrencyFormatter.shared.format(average))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                    
-                    Text("Last 6 months")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct LoanActivityCard: View {
-    @EnvironmentObject var dataManager: DataManager
-    let startDate: Date
-    let endDate: Date
-    
-    var loansIssuedInPeriod: [Loan] {
-        dataManager.activeLoans.filter { loan in
-            guard let issueDate = loan.issueDate else { return false }
-            return issueDate >= startDate && issueDate <= endDate
-        }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Loan Activity")
-                .font(.headline)
-            
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(loansIssuedInPeriod.count)")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text("New Loans")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(CurrencyFormatter.shared.format(loansIssuedInPeriod.reduce(0) { $0 + $1.amount }))
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text("Total Issued")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct MemberActivityCard: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Member Statistics")
-                .font(.headline)
-            
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(dataManager.members.filter { $0.memberStatus == .active }.count)")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text("Active Members")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(dataManager.members.filter { $0.hasActiveLoans }.count)")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text("With Active Loans")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct AnalyticsReport: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // Fund Growth Chart
-            FundGrowthChart()
-            
-            // Member Distribution
-            MemberDistributionChart()
-            
-            // Loan Performance Metrics
-            LoanPerformanceMetrics()
-        }
-        .padding()
-    }
-}
-
-struct FundGrowthChart: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var fundGrowthData: [(month: String, balance: Double)] {
-        return ChartDataGenerator.shared.generateFundGrowthData(
-            months: 6,
-            context: PersistenceController.shared.container.viewContext
-        )
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Fund Growth Trend")
-                .font(.headline)
-            
-            if fundGrowthData.isEmpty {
-                Text("No fund data available")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(height: 200)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                Chart(fundGrowthData, id: \.month) { item in
-                    LineMark(
-                        x: .value("Month", item.month),
-                        y: .value("Balance", item.balance)
-                    )
-                    .foregroundStyle(.blue)
-                    .interpolationMethod(.catmullRom)
-                    
-                    AreaMark(
-                        x: .value("Month", item.month),
-                        y: .value("Balance", item.balance)
-                    )
-                    .foregroundStyle(.blue.opacity(0.2))
-                    .interpolationMethod(.catmullRom)
-                }
-                .frame(height: 200)
-                .chartYAxis {
-                    AxisMarks { value in
-                        AxisValueLabel {
-                            if let balance = value.as(Double.self) {
-                                Text(CurrencyFormatter.shared.formatShort(balance))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct MemberDistributionChart: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var membersByRole: [(role: String, count: Int)] {
-        let grouped = Dictionary(grouping: dataManager.members) { $0.memberRole }
-        return grouped.map { (role: $0.key.displayName, count: $0.value.count) }
-            .sorted { $0.count > $1.count }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Member Distribution by Role")
-                .font(.headline)
-            
-            ForEach(membersByRole, id: \.role) { item in
-                HStack {
-                    Text(item.role)
-                        .font(.subheadline)
-                    Spacer()
-                    Text("\(item.count)")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-                .padding(.vertical, 4)
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct LoanPerformanceMetrics: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var averageLoanAmount: Double {
-        let loans = dataManager.activeLoans
-        guard !loans.isEmpty else { return 0 }
-        return loans.reduce(0) { $0 + $1.amount } / Double(loans.count)
-    }
-    
-    var repaymentRate: Double {
-        let completedLoans = dataManager.members.flatMap { member in
-            (member.loans?.allObjects as? [Loan] ?? []).filter { $0.loanStatus == .completed }
-        }
-        let totalLoans = dataManager.members.flatMap { member in
-            (member.loans?.allObjects as? [Loan] ?? [])
-        }
-        guard !totalLoans.isEmpty else { return 0 }
-        return Double(completedLoans.count) / Double(totalLoans.count)
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Loan Performance")
-                .font(.headline)
-            
-            VStack(spacing: 16) {
-                HStack {
-                    Text("Average Loan Amount")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(CurrencyFormatter.shared.format(averageLoanAmount))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-                
-                HStack {
-                    Text("Repayment Success Rate")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "%.1f%%", repaymentRate * 100))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundStyle(repaymentRate > 0.8 ? .green : .orange)
-                }
-                
-                HStack {
-                    Text("Active Loans")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(dataManager.activeLoans.count)")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct MemberInfoCard: View {
-    let member: Member
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(member.name ?? "Unknown")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    Text(member.memberRole.displayName)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                StatusBadge(status: member.memberStatus)
-            }
-            
-            Divider()
-
-            HStack {
-                InfoItem(label: "Member Since", value: DateHelper.formatDate(member.joinDate))
-                Spacer()
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct InfoItem: View {
-    let label: String
-    let value: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline)
-        }
-    }
-}
-
-struct MemberFinancialSummary: View {
-    let member: Member
-    
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 16) {
-                FinancialReportMetricCard(
-                    title: "Total Contributions",
-                    amount: member.totalContributions,
-                    icon: "banknote.fill",
-                    color: .green
-                )
-                
-                FinancialReportMetricCard(
-                    title: "Active Loan Balance",
-                    amount: member.totalActiveLoanBalance,
-                    icon: "creditcard.fill",
-                    color: .orange
-                )
-            }
-            
-            if member.cashOutAmount > 0 {
-                FinancialReportMetricCard(
-                    title: "Cash Out Amount",
-                    amount: member.cashOutAmount,
-                    icon: "dollarsign.circle.fill",
-                    color: .purple
-                )
-            }
-            
-            // Net Position
-            let netPosition = member.totalContributions - member.totalActiveLoanBalance
-            HStack {
-                Text("Net Position")
-                    .font(.headline)
-                Spacer()
-                Text(CurrencyFormatter.shared.format(netPosition))
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(netPosition >= 0 ? .green : .red)
-            }
-            .padding()
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-    }
-}
-
-struct FinancialReportMetricCard: View {
-    let title: String
-    let amount: Double
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                Spacer()
-            }
-            
-            Text(CurrencyFormatter.shared.format(amount))
-                .font(.title3)
-                .fontWeight(.semibold)
-            
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct ContributionHistoryChart: View {
-    let member: Member
-    
-    var body: some View {
-        Text("Contribution History Chart")
-            .padding()
-    }
-}
-
-struct MemberLoanHistory: View {
-    let member: Member
-    
-    var loans: [Loan] {
-        (member.loans?.allObjects as? [Loan] ?? [])
-            .sorted { ($0.issueDate ?? Date()) > ($1.issueDate ?? Date()) }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Loan History")
-                .font(.headline)
-            
-            if loans.isEmpty {
-                Text("No loans taken")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
-            } else {
-                ForEach(loans) { loan in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(CurrencyFormatter.shared.format(loan.amount))
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("Issued \(DateHelper.formatDate(loan.issueDate))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            if loan.loanStatus == .completed {
-                                Label("Completed", systemImage: "checkmark.circle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
-                            } else if loan.isOverdue {
-                                Label("Overdue", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            } else {
-                                Label("Active", systemImage: "circle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                        
-                        if loan.loanStatus == .active {
-                            ProgressView(value: loan.completionPercentage, total: 100)
-                                .tint(loan.isOverdue ? .red : Color.accentColor)
-                            
-                            HStack {
-                                Text("Balance: \(CurrencyFormatter.shared.format(loan.balance))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text("\(Int(loan.completionPercentage))% paid")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct MemberTransactionHistory: View {
-    let member: Member
-    
-    var transactions: [Transaction] {
-        (member.transactions?.allObjects as? [Transaction] ?? [])
-            .sorted { ($0.createdAt ?? Date()) > ($1.createdAt ?? Date()) }
-            .prefix(10)
-            .map { $0 }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Transactions")
-                .font(.headline)
-            
-            if transactions.isEmpty {
-                Text("No transactions found")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
-            } else {
-                ForEach(transactions) { transaction in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(transaction.transactionType.displayName)
-                                .font(.subheadline)
-                            Text(DateHelper.formatDate(transaction.transactionDate))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        Spacer()
-                        
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(CurrencyFormatter.shared.format(abs(transaction.amount)))
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(transaction.transactionType.isCredit ? .green : .red)
-                            
-                            if let description = transaction.transactionDescription {
-                                Text(description)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    
-                    if transaction != transactions.last {
-                        Divider()
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct RecentActivitySection: View {
-    @EnvironmentObject var dataManager: DataManager
-    
-    var recentTransactions: [Transaction] {
-        dataManager.recentTransactions.prefix(10).map { $0 }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Activity")
-                .font(.headline)
-            
-            if recentTransactions.isEmpty {
-                Text("No recent transactions")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
-            } else {
-                ForEach(recentTransactions.prefix(5)) { transaction in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(transaction.transactionDescription ?? "Transaction")
-                                .font(.subheadline)
-                            Text(DateHelper.formatDate(transaction.transactionDate))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        Spacer()
-                        
-                        Text(CurrencyFormatter.shared.format(abs(transaction.amount)))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(transaction.amount > 0 ? .green : .red)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    if transaction != recentTransactions.prefix(5).last {
-                        Divider()
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-// MARK: - Report Type Button
-
-struct ReportTypeButton: View {
+private struct ReportTypeChip: View {
     let reportType: ReportsView.ReportType
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            HStack(spacing: 10) {
                 Image(systemName: reportType.icon)
-                    .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(iconColor)
-
-                Text(reportType.rawValue)
-                    .font(.caption2)
-                    .foregroundStyle(textColor)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(reportType.rawValue)
+                        .font(.subheadline)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                    Text(reportType.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .frame(width: 88, height: 66)
-            .background(backgroundView)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+                    )
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
-                        isSelected ? Color.accentColor.opacity(0.3) : Color.clear,
+                        isSelected ? Color.accentColor.opacity(0.35) : Color.clear,
                         lineWidth: 1.5
                     )
             )
         }
         .buttonStyle(.plain)
     }
+}
 
-    private var iconColor: Color {
-        if isSelected {
-            return .accentColor
-        } else {
-            return .secondary
+// MARK: - Monthly statement preview
+
+private struct MonthlyStatementPreview: View {
+    @EnvironmentObject var dataManager: DataManager
+    let month: StatementMonth
+    @Binding var isGenerating: Bool
+    let onGenerate: () -> Void
+
+    private var calculator: StatementCalculator {
+        StatementCalculator(asOf: month.endDate)
+    }
+
+    private var rows: [MemberRow] {
+        dataManager.members
+            .filter { calculator.wasActive($0) }
+            .map { member in
+                MemberRow(
+                    name: member.name ?? "Unknown",
+                    role: member.memberRole.displayName,
+                    contributions: calculator.contributions(for: member),
+                    loanBalance: calculator.outstandingLoanBalance(for: member),
+                    monthlyPayment: calculator.monthlyLoanPaymentDue(for: member)
+                )
+            }
+            .sorted { $0.name < $1.name }
+    }
+
+    private var fundBalance: Double { calculator.fundBalance() }
+    private var totalContributions: Double { calculator.totalContributions() }
+    private var totalOutstanding: Double { calculator.totalOutstandingLoans() }
+    private var activeCount: Int { calculator.activeMembersCount() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Statement for \(month.displayName)")
+                .font(.title2.weight(.semibold))
+
+            // Metrics row
+            HStack(spacing: 12) {
+                metricCard("Fund Balance", value: CurrencyFormatter.shared.format(fundBalance), tint: .green)
+                metricCard("Total Contributions", value: CurrencyFormatter.shared.format(totalContributions), tint: .blue)
+                metricCard("Outstanding Loans", value: CurrencyFormatter.shared.format(totalOutstanding), tint: .orange)
+                metricCard("Active Members", value: "\(activeCount)", tint: .purple)
+            }
+
+            // Member table
+            VStack(alignment: .leading, spacing: 0) {
+                tableHeader
+
+                ForEach(rows) { row in
+                    HStack(spacing: 0) {
+                        Text(row.name)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(row.role)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 140, alignment: .leading)
+                        Text(CurrencyFormatter.shared.format(row.contributions))
+                            .frame(width: 140, alignment: .trailing)
+                            .monospacedDigit()
+                        Text(row.loanBalance > 0 ? CurrencyFormatter.shared.format(row.loanBalance) : "—")
+                            .foregroundStyle(row.loanBalance > 0 ? .primary : .secondary)
+                            .frame(width: 140, alignment: .trailing)
+                            .monospacedDigit()
+                        Text(row.monthlyPayment > 0 ? CurrencyFormatter.shared.format(row.monthlyPayment) : "—")
+                            .foregroundStyle(row.monthlyPayment > 0 ? .primary : .secondary)
+                            .frame(width: 140, alignment: .trailing)
+                            .monospacedDigit()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .font(.callout)
+                    .background(Color.secondary.opacity(0.04))
+                    .overlay(Divider(), alignment: .bottom)
+                }
+
+                // Totals row
+                HStack(spacing: 0) {
+                    Text("Total")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("")
+                        .frame(width: 140)
+                    Text(CurrencyFormatter.shared.format(rows.map(\.contributions).reduce(0, +)))
+                        .fontWeight(.semibold)
+                        .frame(width: 140, alignment: .trailing)
+                        .monospacedDigit()
+                    Text(CurrencyFormatter.shared.format(rows.map(\.loanBalance).reduce(0, +)))
+                        .fontWeight(.semibold)
+                        .frame(width: 140, alignment: .trailing)
+                        .monospacedDigit()
+                    Text(CurrencyFormatter.shared.format(rows.map(\.monthlyPayment).reduce(0, +)))
+                        .fontWeight(.semibold)
+                        .frame(width: 140, alignment: .trailing)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .font(.callout)
+                .background(Color.accentColor.opacity(0.06))
+            }
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            generateButton
         }
     }
 
-    private var textColor: Color {
-        isSelected ? .primary : .secondary
+    private var tableHeader: some View {
+        HStack(spacing: 0) {
+            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Role").frame(width: 140, alignment: .leading)
+            Text("Contributions").frame(width: 140, alignment: .trailing)
+            Text("Loan Balance").frame(width: 140, alignment: .trailing)
+            Text("Monthly Due").frame(width: 140, alignment: .trailing)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.secondary.opacity(0.10))
     }
 
-    @ViewBuilder
-    private var backgroundView: some View {
-        if isSelected {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.accentColor.opacity(0.08))
+    private func metricCard(_ title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+            Capsule()
+                .fill(tint)
+                .frame(height: 3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var generateButton: some View {
+        Button(action: onGenerate) {
+            HStack {
+                if isGenerating {
+                    ProgressView().scaleEffect(0.8)
+                } else {
+                    Image(systemName: "doc.text.magnifyingglass")
+                }
+                Text("Generate & Open in Preview")
+                    .fontWeight(.medium)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(Color.accentColor)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isGenerating)
+    }
+
+    private struct MemberRow: Identifiable {
+        let id = UUID()
+        let name: String
+        let role: String
+        let contributions: Double
+        let loanBalance: Double
+        let monthlyPayment: Double
+    }
+}
+
+// MARK: - Member statement preview
+
+private struct MemberStatementPreview: View {
+    @EnvironmentObject var dataManager: DataManager
+    let member: Member
+    let month: StatementMonth
+    @Binding var isGenerating: Bool
+    let onBack: () -> Void
+    let onGenerate: () -> Void
+
+    private var openingCalc: StatementCalculator { StatementCalculator(asOf: month.priorMonthEndDate) }
+    private var closingCalc: StatementCalculator { StatementCalculator(asOf: month.endDate) }
+
+    private var openingContrib: Double { openingCalc.contributions(for: member) }
+    private var closingContrib: Double { closingCalc.contributions(for: member) }
+    private var openingLoan: Double { openingCalc.outstandingLoanBalance(for: member) }
+    private var closingLoan: Double { closingCalc.outstandingLoanBalance(for: member) }
+
+    private var entries: [PeriodEntry] {
+        let payments = (member.payments?.allObjects as? [Payment]) ?? []
+        var rows: [PeriodEntry] = []
+
+        for payment in payments {
+            guard let date = payment.paymentDate,
+                  date >= month.startDate, date <= month.endDate else { continue }
+
+            if payment.contributionAmount > 0 {
+                rows.append(PeriodEntry(
+                    date: date,
+                    kind: "Contribution",
+                    detail: "Monthly contribution",
+                    signedAmount: payment.contributionAmount
+                ))
+            }
+            if payment.loanRepaymentAmount > 0 {
+                rows.append(PeriodEntry(
+                    date: date,
+                    kind: "Loan Repayment",
+                    detail: payment.loan?.member?.name.map { "Toward loan: \($0)" } ?? "Loan payment",
+                    signedAmount: -payment.loanRepaymentAmount
+                ))
+            }
+        }
+
+        // Loans disbursed to this member during the period
+        let loans = (member.loans?.allObjects as? [Loan]) ?? []
+        for loan in loans {
+            guard let issued = loan.issueDate,
+                  issued >= month.startDate, issued <= month.endDate else { continue }
+            rows.append(PeriodEntry(
+                date: issued,
+                kind: "Loan Disbursed",
+                detail: "Loan amount: \(CurrencyFormatter.shared.format(loan.amount))",
+                signedAmount: -loan.amount
+            ))
+        }
+
+        return rows.sorted { $0.date < $1.date }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Button(action: onBack) {
+                    Label("Members", systemImage: "chevron.left")
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(member.name ?? "Unknown")
+                    .font(.title2.weight(.semibold))
+                Text("\(member.memberRole.displayName) • Statement for \(month.displayName)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Opening / Closing
+            HStack(spacing: 12) {
+                balanceCard(
+                    title: "Contributions",
+                    opening: openingContrib,
+                    closing: closingContrib,
+                    tint: .blue
                 )
-        } else {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.ultraThinMaterial)
-                .opacity(0.5)
+                balanceCard(
+                    title: "Loan Balance",
+                    opening: openingLoan,
+                    closing: closingLoan,
+                    tint: closingLoan > 0 ? .orange : .green
+                )
+            }
+
+            // Period entries
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    Text("Date").frame(width: 90, alignment: .leading)
+                    Text("Type").frame(width: 130, alignment: .leading)
+                    Text("Detail").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Amount").frame(width: 120, alignment: .trailing)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.secondary.opacity(0.10))
+
+                if entries.isEmpty {
+                    Text("No activity in \(month.displayName).")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 24)
+                } else {
+                    ForEach(entries) { entry in
+                        HStack(spacing: 0) {
+                            Text(DateFormatter.shortDate.string(from: entry.date))
+                                .frame(width: 90, alignment: .leading)
+                            Text(entry.kind)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 130, alignment: .leading)
+                            Text(entry.detail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1)
+                            Text(formatSigned(entry.signedAmount))
+                                .foregroundStyle(entry.signedAmount > 0 ? .green : .primary)
+                                .frame(width: 120, alignment: .trailing)
+                                .monospacedDigit()
+                        }
+                        .font(.callout)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Color.secondary.opacity(0.04))
+                        .overlay(Divider(), alignment: .bottom)
+                    }
+                }
+            }
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            generateButton
+        }
+    }
+
+    private func balanceCard(title: String, opening: Double, closing: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Opening")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(CurrencyFormatter.shared.format(opening))
+                        .font(.subheadline)
+                        .monospacedDigit()
+                }
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Closing")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(CurrencyFormatter.shared.format(closing))
+                        .font(.headline)
+                        .monospacedDigit()
+                }
+            }
+            Capsule().fill(tint).frame(height: 3)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func formatSigned(_ amount: Double) -> String {
+        let formatted = CurrencyFormatter.shared.format(abs(amount))
+        return amount >= 0 ? "+\(formatted)" : "-\(formatted)"
+    }
+
+    private var generateButton: some View {
+        Button(action: onGenerate) {
+            HStack {
+                if isGenerating {
+                    ProgressView().scaleEffect(0.8)
+                } else {
+                    Image(systemName: "doc.text.magnifyingglass")
+                }
+                Text("Generate & Open in Preview")
+                    .fontWeight(.medium)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(Color.accentColor)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isGenerating)
+    }
+
+    private struct PeriodEntry: Identifiable {
+        let id = UUID()
+        let date: Date
+        let kind: String
+        let detail: String
+        let signedAmount: Double
+    }
+}
+
+// MARK: - Member picker (for member-statement flow)
+
+private struct MemberPicker: View {
+    @EnvironmentObject var dataManager: DataManager
+    @Binding var selectedMember: Member?
+
+    private var sortedMembers: [Member] {
+        dataManager.members.sorted { ($0.name ?? "") < ($1.name ?? "") }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Select a member")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                ForEach(sortedMembers) { member in
+                    Button {
+                        selectedMember = member
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(member.name ?? "Unknown")
+                                    .fontWeight(.medium)
+                                Text(member.memberRole.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if member.memberStatus != .active {
+                                Text(member.memberStatus.rawValue.capitalized)
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.18))
+                                    .foregroundStyle(.red)
+                                    .clipShape(Capsule())
+                            }
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                        .padding(14)
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color.secondary.opacity(0.04))
+                    .overlay(Divider(), alignment: .bottom)
+                }
+            }
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 }
+
+// `DateFormatter.shortDate` is declared in PDFGenerator.swift (also
+// macOS-only). Reused here so the in-app preview and the printed PDF
+// show identical date strings.
 
 #Preview {
     ReportsView()
         .environmentObject(DataManager.shared)
 }
+
 #endif
