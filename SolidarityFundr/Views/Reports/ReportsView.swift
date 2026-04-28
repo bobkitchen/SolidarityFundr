@@ -795,25 +795,30 @@ struct MemberSelector: View {
 }
 
 
-// Placeholder implementations for other report components
 struct LoanSummaryReport: View {
     @EnvironmentObject var dataManager: DataManager
     let startDate: Date
     let endDate: Date
     
+    /// Loans whose issueDate falls within the selected period.
+    /// Includes completed loans, since the user is asking "what was issued
+    /// in this window" — the report's "Total Loans Issued" metric only
+    /// makes sense with that interpretation.
     var filteredLoans: [Loan] {
-        // Show all active loans regardless of date range for loan summary
-        dataManager.activeLoans
+        dataManager.allLoans.filter { loan in
+            guard let issued = loan.issueDate else { return false }
+            return issued >= startDate && issued <= endDate
+        }
     }
-    
+
     var totalLoanAmount: Double {
         filteredLoans.reduce(0) { $0 + $1.amount }
     }
-    
+
     var totalOutstanding: Double {
         filteredLoans.reduce(0) { $0 + $1.balance }
     }
-    
+
     var overdueLoans: [Loan] {
         filteredLoans.filter { $0.isOverdue }
     }

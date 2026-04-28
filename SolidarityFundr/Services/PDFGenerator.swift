@@ -152,7 +152,22 @@ class PDFGenerator {
         let activeMembers = dataManager.members
             .filter { $0.memberStatus == .active }
             .map { MemberSnapshot(member: $0) }
-        let activeLoans = dataManager.activeLoans.map { LoanSnapshot(loan: $0) }
+
+        // For Loan Summary the user has selected a period; show loans
+        // *issued* in that window (matches the in-app view at
+        // ReportsView.LoanSummaryReport.filteredLoans). All other report
+        // types still want the current snapshot of active loans.
+        let activeLoans: [LoanSnapshot]
+        if type == .loanSummary {
+            activeLoans = dataManager.allLoans
+                .filter { loan in
+                    guard let issued = loan.issueDate else { return false }
+                    return issued >= startDate && issued <= endDate
+                }
+                .map { LoanSnapshot(loan: $0) }
+        } else {
+            activeLoans = dataManager.activeLoans.map { LoanSnapshot(loan: $0) }
+        }
 
         let memberSnapshot = member.map { MemberSnapshot(member: $0) }
 
