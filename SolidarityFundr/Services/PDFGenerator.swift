@@ -222,11 +222,15 @@ class PDFGenerator {
 
         let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792) // US Letter
 
-        // Create graphics context
+        // Create graphics context with PDF document metadata so when
+        // recipients open the file (e.g. on iPhone via WhatsApp/Mail),
+        // Preview/Quick Look surfaces a real Title and Author instead of
+        // the raw filename.
         let data = NSMutableData()
         var mediaBox = pageRect
+        let auxiliaryInfo = self.pdfAuxiliaryInfo(for: reportData)
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
-              let pdfContext = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
+              let pdfContext = CGContext(consumer: consumer, mediaBox: &mediaBox, auxiliaryInfo as CFDictionary) else {
             throw PDFError.contextCreationFailed
         }
 
@@ -277,12 +281,38 @@ class PDFGenerator {
         pdfContext.endPDFPage()
         pdfContext.closePDF()
 
-        // Save to file
-        let fileName = "\(reportData.type.rawValue.replacingOccurrences(of: " ", with: "_"))_\(Date().timeIntervalSince1970).pdf"
+        // Save to file. ISO-style date in the filename is friendlier than
+        // the raw epoch we used to emit, and sorts naturally in Finder.
+        let fileName = "\(reportData.type.rawValue.replacingOccurrences(of: " ", with: "_"))_\(Self.fileNameDateFormatter.string(from: Date())).pdf"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         try data.write(to: url)
 
         return url
+    }
+
+    private static let fileNameDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// Metadata embedded in the PDF document itself (read by Preview,
+    /// Quick Look, Files app, Mail, WhatsApp, etc.).
+    private func pdfAuxiliaryInfo(for reportData: PDFReportData) -> [String: Any] {
+        let monthYear: String = {
+            let f = DateFormatter()
+            f.dateFormat = "MMMM yyyy"
+            return f.string(from: reportData.endDate)
+        }()
+        let title = "\(reportData.type.rawValue) — \(monthYear)"
+        return [
+            kCGPDFContextTitle as String: title,
+            kCGPDFContextAuthor as String: "Bob Kitchen",
+            kCGPDFContextCreator as String: "Parachichi House Solidarity Fund",
+            kCGPDFContextSubject as String: "Parachichi House Solidarity Fund — \(reportData.type.rawValue)",
+            kCGPDFContextKeywords as String: "Solidarity Fund, Parachichi House, \(reportData.type.rawValue)"
+        ]
     }
 
     // MARK: - Drawing Methods (Use only snapshot data, never Core Data objects)
@@ -537,6 +567,30 @@ class PDFGenerator {
         return currentY
     }
 
+    /// Avocado-green disc with "PHSF" monogram — used only when the
+    /// asset-catalog logo can't be loaded, so the report still has
+    /// a recognisable brand mark in the header.
+    private func drawTextLogoFallback(in rect: CGRect) {
+        let context = NSGraphicsContext.current?.cgContext
+        context?.saveGState()
+        // Avocado-green disc background.
+        let avocado = NSColor(calibratedRed: 0.42, green: 0.55, blue: 0.30, alpha: 1.0)
+        context?.setFillColor(avocado.cgColor)
+        let path = NSBezierPath(ovalIn: rect)
+        path.fill()
+        // Monogram.
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .bold),
+            .foregroundColor: NSColor.white
+        ]
+        let text = "PHSF"
+        let size = text.size(withAttributes: attrs)
+        let drawPoint = CGPoint(x: rect.midX - size.width / 2,
+                                y: rect.midY - size.height / 2)
+        text.draw(at: drawPoint, withAttributes: attrs)
+        context?.restoreGState()
+    }
+
     private func drawCompactHeader(in pageRect: CGRect, at yPosition: CGFloat) -> CGFloat {
         var currentY = yPosition
         let leftMargin: CGFloat = 40
@@ -550,11 +604,14 @@ class PDFGenerator {
         context?.fill(headerRect)
         context?.restoreGState()
 
-        // Draw logo
+        // Draw logo — with a clean text-mark fallback so a missing asset
+        // never leaves the report visually unbranded.
         let logoSize: CGFloat = 50
+        let logoRect = CGRect(x: leftMargin, y: currentY - headerHeight + 10, width: logoSize, height: logoSize)
         if let logoImage = NSImage(named: "AvocadoLogo") {
-            let logoRect = CGRect(x: leftMargin, y: currentY - headerHeight + 10, width: logoSize, height: logoSize)
             logoImage.draw(in: logoRect)
+        } else {
+            drawTextLogoFallback(in: logoRect)
         }
 
         // Title - Line 1
