@@ -123,7 +123,15 @@ struct SettingsView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            
+
+            // Sandbox-scoped resource access is required when reading a
+            // user-picked file outside the app container. The previous
+            // version skipped this and the import failed with
+            // "couldn't be opened because you don't have permission to
+            // view it" for any file in ~/Downloads or similar.
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
             do {
                 let data = try Data(contentsOf: url)
                 try DataImportExport.shared.importData(from: data)
