@@ -28,14 +28,14 @@ struct SettingsView: View {
         case general = "General"
         case security = "Security"
         case dataSync = "Data & Sync"
-        case advanced = "Advanced"
+        case about = "About"
 
         var icon: String {
             switch self {
             case .general: return "gear"
             case .security: return "lock.shield"
             case .dataSync: return "icloud.and.arrow.up"
-            case .advanced: return "wrench.and.screwdriver"
+            case .about: return "info.circle"
             }
         }
     }
@@ -58,7 +58,7 @@ struct SettingsView: View {
                 ),
                 .dataSync
             )
-            tab(AdvancedSettingsView(dataManager: dataManager), .advanced)
+            tab(AboutSettingsView(dataManager: dataManager), .about)
         }
         .frame(minWidth: 560, idealWidth: 640, minHeight: 460, idealHeight: 560)
         .alert("Success", isPresented: $showingSuccessAlert) {
@@ -186,6 +186,7 @@ struct GeneralSettingsView: View {
     @State private var overrideUtilizationWarning = false
     @State private var overrideMinimumBalance = false
     @State private var allowPartialPayments = false
+    @State private var showingInterestAppliedAlert = false
 
     var body: some View {
         Section("Fund Configuration") {
@@ -236,6 +237,39 @@ struct GeneralSettingsView: View {
                     .font(.callout)
             }
         }
+
+        Section {
+            if let fundSettings = dataManager.fundSettings {
+                LabeledContent("Total Interest Applied") {
+                    Text(CurrencyFormatter.shared.format(fundSettings.totalInterestApplied))
+                }
+                if let lastApplied = fundSettings.lastInterestAppliedDate {
+                    LabeledContent("Last Applied") {
+                        Text(DateHelper.formatDate(lastApplied))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
+                LabeledContent("Potential Interest") {
+                    Text(CurrencyFormatter.shared.format(potentialInterest))
+                        .foregroundStyle(potentialInterest > 0 ? .green : .secondary)
+                }
+                Button {
+                    dataManager.applyAnnualInterest()
+                    showingInterestAppliedAlert = true
+                } label: {
+                    Label("Apply Annual Interest", systemImage: "percent")
+                }
+                .disabled(potentialInterest <= 0)
+            }
+        } header: {
+            Text("Fund Operations")
+        } footer: {
+            Text("Applies the configured annual rate to the fund's total value. Once-yearly action.")
+        }
+        .alert("Annual interest applied", isPresented: $showingInterestAppliedAlert) {
+            Button("OK") {}
+        }
         .onAppear { loadSettings() }
         // Auto-save on every change — macOS Settings convention.
         .onChange(of: monthlyContribution) { saveSettings() }
@@ -270,31 +304,20 @@ struct GeneralSettingsView: View {
 
 struct SecuritySettingsTabView: View {
     var body: some View {
-            SettingsSection(title: "Authentication", icon: "lock.shield") {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
-                    NavigationLink {
-                        SecuritySettingsView()
-                    } label: {
-                        HStack {
-                            Label("Security Settings", systemImage: "lock.shield")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button {
-                        AuthenticationManager.shared.logout()
-                    } label: {
-                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
-                            .foregroundStyle(.red)
-                    }
-                }
+        Section("Authentication") {
+            NavigationLink {
+                SecuritySettingsView()
+            } label: {
+                Label("Security Settings", systemImage: "lock.shield")
             }
-            
-            // Privacy section could go here
+
+            Button {
+                AuthenticationManager.shared.logout()
+            } label: {
+                Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    .foregroundStyle(.red)
+            }
+        }
     }
 }
 
@@ -306,179 +329,105 @@ struct DataSyncSettingsView: View {
     @Binding var showingImport: Bool
     @Binding var showingExport: Bool
     @Binding var showingResetConfirmation: Bool
-    
-    @State private var autoSyncEnabled = true
-    @State private var syncInterval = 3
+
     @State private var showingCloudKitDetails = false
     @State private var showingMessage = false
     @State private var alertMessage = ""
-    
+
     var body: some View {
-            // iCloud Sync
-            SettingsSection(title: "iCloud Sync", icon: "icloud") {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
-                    // Sync Status
-                    HStack {
-                        Label("Sync Status", systemImage: "icloud")
-                        Spacer()
-                        Text(syncManager.syncStatus.displayText)
-                            .foregroundStyle(syncStatusColor)
-                            .font(.subheadline)
-                        
-                        if case .syncing = syncManager.syncStatus {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        showingCloudKitDetails = true
-                    }
-                    
-                    // Last Sync
-                    if let lastSync = syncManager.lastSyncDate {
-                        HStack {
-                            Label("Last Sync", systemImage: "clock")
-                            Spacer()
-                            Text(formatSyncTime(lastSync))
-                                .foregroundStyle(.secondary)
-                                .font(.subheadline)
-                        }
-                    }
-                    
-                    // Network Status
-                    HStack {
-                        Label("Network", systemImage: syncManager.isOnline ? "wifi" : "wifi.slash")
-                        Spacer()
-                        Text(syncManager.isOnline ? "Online" : "Offline")
-                            .foregroundStyle(syncManager.isOnline ? .green : .gray)
-                            .font(.subheadline)
-                    }
-                    
-                    Divider()
-                    
-                    // Auto Sync
-                    Toggle(isOn: $autoSyncEnabled) {
-                        Label("Automatic Sync", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .onChange(of: autoSyncEnabled) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "auto_sync_enabled")
-                    }
-                    
-                    if autoSyncEnabled {
-                        SettingsRow(label: "Sync Frequency", systemImage: "timer") {
-                            Picker("", selection: $syncInterval) {
-                                Text("3 minutes").tag(3)
-                                Text("5 minutes").tag(5)
-                                Text("10 minutes").tag(10)
-                                Text("15 minutes").tag(15)
-                            }
-                            .labelsHidden()
-                            .onChange(of: syncInterval) { _, newValue in
-                                UserDefaults.standard.set(newValue, forKey: "sync_interval_minutes")
-                            }
-                        }
-                    }
-                    
-                    Button {
-                        syncManager.saveAndSurfaceState()
-                    } label: {
-                        Label("Save Local Changes", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(syncManager.syncStatus == .syncing || !syncManager.isOnline)
-                    
-                    // Error Display
-                    if let error = syncManager.syncError {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label("Sync Error", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                                .font(.subheadline)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+        // iCloud Sync — surfaces state. NSPersistentCloudKitContainer
+        // propagates changes via APNs silent push automatically; there
+        // is no public API to schedule polling, so the previous
+        // "Automatic Sync" / "Sync Frequency" toggles wrote to dead
+        // UserDefaults keys and have been removed.
+        Section("iCloud Sync") {
+            LabeledContent("Status") {
+                HStack(spacing: 6) {
+                    Text(syncManager.syncStatus.displayText)
+                        .foregroundStyle(syncStatusColor)
+                    if case .syncing = syncManager.syncStatus {
+                        ProgressView().controlSize(.small)
                     }
                 }
             }
-            
-            // Data Management
-            SettingsSection(title: "Data Management", icon: "externaldrive") {
-                VStack(alignment: .leading, spacing: DesignSystem.spacingMedium) {
-                    Button {
-                        showingImport = true
-                    } label: {
-                        Label("Import Data", systemImage: "square.and.arrow.down")
-                    }
-                    
-                    Button {
-                        showingExport = true
-                    } label: {
-                        Label("Export Backup", systemImage: "square.and.arrow.up")
-                    }
-                    
-                    Divider()
-                    
-                    // Auto-backup
-                    Toggle("Auto-Backup Weekly", isOn: .init(
-                        get: { UserDefaults.standard.bool(forKey: "auto_backup_enabled") },
-                        set: { UserDefaults.standard.set($0, forKey: "auto_backup_enabled") }
-                    ))
-                    
-                    if UserDefaults.standard.bool(forKey: "auto_backup_enabled") {
-                        HStack {
-                            Text("Backup Location")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text("~/Documents/SolidarityFund/Backups")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    // Maintenance
-                    Button {
-                        dataManager.createMissingTransactions()
-                        alertMessage = "Transaction linking process completed"
-                        showingMessage = true
-                    } label: {
-                        Label("Fix Missing Transactions", systemImage: "link.badge.plus")
-                    }
-                    .help("Creates transaction records for any payments that don't have them")
-                    
-                    Button {
-                        dataManager.fixIncorrectTransactions()
-                        alertMessage = "Transaction correction process completed"
-                        showingMessage = true
-                    } label: {
-                        Label("Fix Incorrect Transactions", systemImage: "exclamationmark.arrow.circlepath")
-                    }
-                    .help("Fixes transactions that don't match their payment type")
-                    
-                    Divider()
-                    
-                    Button {
-                        DataManager.shared.deleteTestUsers()
-                        alertMessage = "Test users have been deleted"
-                        showingMessage = true
-                    } label: {
-                        Label("Delete Test Users", systemImage: "person.3.sequence.fill")
-                            .foregroundStyle(.orange)
-                    }
-                    .help("Removes users named: Test User, John Doe, Jane Doe, Test Member, Sample Member")
-                    
-                    Button(role: .destructive) {
-                        showingResetConfirmation = true
-                    } label: {
-                        Label("Reset All Data", systemImage: "trash")
-                    }
-                }
+            .contentShape(Rectangle())
+            .onTapGesture { showingCloudKitDetails = true }
+
+            if let lastSync = syncManager.lastSyncDate {
+                LabeledContent("Last Sync", value: formatSyncTime(lastSync))
             }
-        .onAppear {
-            autoSyncEnabled = UserDefaults.standard.object(forKey: "auto_sync_enabled") as? Bool ?? true
-            syncInterval = UserDefaults.standard.object(forKey: "sync_interval_minutes") as? Int ?? 3
+
+            LabeledContent("Network") {
+                Text(syncManager.isOnline ? "Online" : "Offline")
+                    .foregroundStyle(syncManager.isOnline ? .green : .secondary)
+            }
+
+            Button {
+                syncManager.saveAndSurfaceState()
+            } label: {
+                Label("Save Local Changes", systemImage: "arrow.clockwise")
+            }
+            .disabled(syncManager.syncStatus == .syncing || !syncManager.isOnline)
+
+            if let error = syncManager.syncError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+            }
+        }
+
+        Section("Backup & Restore") {
+            Button {
+                showingImport = true
+            } label: {
+                Label("Import Data…", systemImage: "square.and.arrow.down")
+            }
+
+            Button {
+                showingExport = true
+            } label: {
+                Label("Export Backup…", systemImage: "square.and.arrow.up")
+            }
+        }
+
+        Section {
+            Button {
+                dataManager.createMissingTransactions()
+                alertMessage = "Transaction linking process completed"
+                showingMessage = true
+            } label: {
+                Label("Fix Missing Transactions", systemImage: "link.badge.plus")
+            }
+            .help("Creates transaction records for any payments that don't have them")
+
+            Button {
+                dataManager.fixIncorrectTransactions()
+                alertMessage = "Transaction correction process completed"
+                showingMessage = true
+            } label: {
+                Label("Fix Incorrect Transactions", systemImage: "exclamationmark.arrow.circlepath")
+            }
+            .help("Fixes transactions that don't match their payment type")
+
+            Button {
+                DataManager.shared.deleteTestUsers()
+                alertMessage = "Test users have been deleted"
+                showingMessage = true
+            } label: {
+                Label("Delete Test Users", systemImage: "person.3.sequence.fill")
+                    .foregroundStyle(.orange)
+            }
+            .help("Removes users named: Test User, John Doe, Jane Doe, Test Member, Sample Member")
+
+            Button(role: .destructive) {
+                showingResetConfirmation = true
+            } label: {
+                Label("Reset All Data", systemImage: "trash")
+            }
+        } header: {
+            Text("Maintenance")
+        } footer: {
+            Text("These actions modify or destroy data. They cannot be undone — make sure a backup exists first.")
         }
         .popover(isPresented: $showingCloudKitDetails) {
             CloudKitDetailsView()
@@ -524,268 +473,42 @@ struct DataSyncSettingsView: View {
     }
 }
 
-// MARK: - Advanced Settings Tab
-
-struct AdvancedSettingsView: View {
-    let dataManager: DataManager
-    @State private var paymentDueNotifications = true
-    @State private var utilizationWarningNotifications = true
-    @State private var interestNotifications = true
-    @State private var syncStatusNotifications = false
-    @State private var notificationDaysBefore = 3
-    @State private var defaultStartupView = "overview"
-    @State private var dateFormat = "medium"
-    @State private var showCurrencySymbol = true
-    @State private var compactReports = false
-    @State private var showingSuccessAlert = false
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: DesignSystem.spacingLarge) {
-                interestManagementSection
-                notificationsSection
-                displayPreferencesSection
-                aboutSection
-            }
-            .padding()
-        }
-        .onAppear {
-            loadSettings()
-        }
-        .alert("Success", isPresented: $showingSuccessAlert) {
-            Button("OK") {}
-        } message: {
-            Text("Annual interest applied successfully")
-        }
-    }
-    
-    // MARK: - View Sections
-    
-    private var interestManagementSection: some View {
-        SettingsSection(title: "Interest Management", icon: "percent") {
-            if let fundSettings = dataManager.fundSettings {
-                    HStack {
-                        Text("Total Interest Applied")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(CurrencyFormatter.shared.format(fundSettings.totalInterestApplied))
-                            .fontWeight(.medium)
-                    }
-                    
-                    if let lastApplied = fundSettings.lastInterestAppliedDate {
-                        HStack {
-                            Text("Last Applied")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(DateHelper.formatDate(lastApplied))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
-                    HStack {
-                        Text("Potential Interest")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(CurrencyFormatter.shared.format(potentialInterest))
-                            .fontWeight(.medium)
-                            .foregroundStyle(.green)
-                    }
-                    
-                    Button {
-                        dataManager.applyAnnualInterest()
-                        showingSuccessAlert = true
-                    } label: {
-                        Label("Apply Annual Interest", systemImage: "percent")
-                    }
-                    .disabled(potentialInterest <= 0)
-            } else {
-                Text("No fund settings available")
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-    
-    private var notificationsSection: some View {
-        SettingsSection(title: "Notifications & Alerts", icon: "bell") {
-            VStack(spacing: DesignSystem.spacingMedium) {
-                    Toggle(isOn: $paymentDueNotifications) {
-                        Label("Payment Due Reminders", systemImage: "bell")
-                    }
-                    .onChange(of: paymentDueNotifications) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "payment_due_notifications")
-                    }
-                    
-                    if paymentDueNotifications {
-                        SettingsRow(label: "Remind Me", systemImage: "calendar") {
-                            Picker("", selection: $notificationDaysBefore) {
-                                Text("1 day before").tag(1)
-                                Text("3 days before").tag(3)
-                                Text("5 days before").tag(5)
-                                Text("7 days before").tag(7)
-                            }
-                            .labelsHidden()
-                        }
-                        .onChange(of: notificationDaysBefore) { _, newValue in
-                            UserDefaults.standard.set(newValue, forKey: "notification_days_before")
-                        }
-                    }
-                    
-                    Toggle(isOn: $utilizationWarningNotifications) {
-                        Label("Fund Utilization Warnings", systemImage: "exclamationmark.triangle")
-                    }
-                    .onChange(of: utilizationWarningNotifications) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "utilization_warning_notifications")
-                    }
-                    
-                    Toggle(isOn: $interestNotifications) {
-                        Label("Interest Application Reminders", systemImage: "percent")
-                    }
-                    .onChange(of: interestNotifications) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "interest_notifications")
-                    }
-                    
-                    Toggle(isOn: $syncStatusNotifications) {
-                        Label("Sync Status Notifications", systemImage: "icloud.and.arrow.up")
-                    }
-                    .onChange(of: syncStatusNotifications) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "sync_status_notifications")
-                    }
-            }
-        }
-    }
-    
-    private var displayPreferencesSection: some View {
-        SettingsSection(title: "Display & Interface", icon: "paintbrush") {
-                    Toggle(isOn: .init(
-                        get: { UserDefaults.standard.bool(forKey: "useLiquidGlass") },
-                        set: { UserDefaults.standard.set($0, forKey: "useLiquidGlass") }
-                    )) {
-                        Label("Use Liquid Glass Design (Beta)", systemImage: "sparkles")
-                    }
-                    .help("Enable the new macOS Tahoe Liquid Glass design system")
-                    
-                    SettingsRow(label: "Default Startup View", systemImage: "square.grid.2x2") {
-                        Picker("", selection: $defaultStartupView) {
-                            Text("Overview").tag("overview")
-                            Text("Members").tag("members")
-                            Text("Loans").tag("loans")
-                            Text("Payments").tag("payments")
-                            Text("Reports").tag("reports")
-                        }
-                        .labelsHidden()
-                        .onChange(of: defaultStartupView) { _, newValue in
-                            UserDefaults.standard.set(newValue, forKey: "default_startup_view")
-                        }
-                    }
-                    
-                    SettingsRow(label: "Date Format", systemImage: "calendar") {
-                        Picker("", selection: $dateFormat) {
-                            Text("Short (7/20/25)").tag("short")
-                            Text("Medium (Jul 20, 2025)").tag("medium")
-                            Text("Long (July 20, 2025)").tag("long")
-                        }
-                        .labelsHidden()
-                        .onChange(of: dateFormat) { _, newValue in
-                            UserDefaults.standard.set(newValue, forKey: "date_format_preference")
-                        }
-                    }
-                    
-                    Toggle(isOn: $showCurrencySymbol) {
-                        Label("Show Currency Symbol", systemImage: "kipsign")
-                    }
-                    .onChange(of: showCurrencySymbol) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "show_currency_symbol")
-                    }
-                    
-                    Toggle(isOn: $compactReports) {
-                        Label("Compact Report View", systemImage: "rectangle.compress.vertical")
-                    }
-                    .onChange(of: compactReports) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "compact_reports")
-                    }
-            
-        }
-    }
-    
-    private var aboutSection: some View {
-        SettingsSection(title: "About", icon: "info.circle") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Version")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("1.0.0")
-                    }
-                    
-                    HStack {
-                        Text("Developer")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Bob Kitchen")
-                    }
-                    
-                    HStack {
-                        Text("Fund Started")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if let fundSettings = dataManager.fundSettings,
-                           let createdAt = fundSettings.createdAt {
-                            Text(DateHelper.formatDate(createdAt))
-                        }
-                    }
-                    
-                    NavigationLink {
-                        DocumentationView()
-                    } label: {
-                        Label("Documentation", systemImage: "doc.text")
-                    }
-            }
-        }
-    }
-    
-    private func loadSettings() {
-        paymentDueNotifications = UserDefaults.standard.object(forKey: "payment_due_notifications") as? Bool ?? true
-        utilizationWarningNotifications = UserDefaults.standard.object(forKey: "utilization_warning_notifications") as? Bool ?? true
-        interestNotifications = UserDefaults.standard.object(forKey: "interest_notifications") as? Bool ?? true
-        syncStatusNotifications = UserDefaults.standard.object(forKey: "sync_status_notifications") as? Bool ?? false
-        notificationDaysBefore = UserDefaults.standard.object(forKey: "notification_days_before") as? Int ?? 3
-        defaultStartupView = UserDefaults.standard.string(forKey: "default_startup_view") ?? "overview"
-        dateFormat = UserDefaults.standard.string(forKey: "date_format_preference") ?? "medium"
-        showCurrencySymbol = UserDefaults.standard.object(forKey: "show_currency_symbol") as? Bool ?? true
-        compactReports = UserDefaults.standard.object(forKey: "compact_reports") as? Bool ?? false
-    }
-}
-
-// MARK: - Settings Section / Row
+// MARK: - About Tab
 //
-// Transparent wrappers. The previous versions wrapped content in GroupBox
-// + Label header + Material backgrounds, double-stacking on Form/.grouped.
-// They also put leading icons on every row, which Apple's own Settings
-// don't do. These now emit stock `Section` and `LabeledContent` so tab
-// bodies render as canonical macOS Settings groups.
+// Replaces the old "Advanced" tab, which had grown into a graveyard of
+// UserDefaults toggles that nothing actually read (notifications that
+// were never scheduled, display prefs that no formatter consulted, a
+// "Use Liquid Glass" toggle that pointed at a code path stripped months
+// ago). The one consequential action that lived here — Apply Annual
+// Interest — has moved into General → Fund Operations where it sits
+// alongside the rates and balances it depends on.
 
-struct SettingsSection<Content: View>: View {
-    let title: String
-    /// Retained for source compatibility but ignored — Apple's Settings
-    /// section headers are plain text, not labels with icons.
-    let icon: String
-    @ViewBuilder let content: () -> Content
+struct AboutSettingsView: View {
+    let dataManager: DataManager
 
-    var body: some View {
-        Section(title) { content() }
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
     }
-}
-
-struct SettingsRow<Content: View>: View {
-    let label: String
-    /// Retained for source compatibility but ignored — Apple's Settings
-    /// rows don't have leading icons in the General/Messaging/etc. tabs.
-    let systemImage: String
-    @ViewBuilder let content: () -> Content
 
     var body: some View {
-        LabeledContent(label) { content() }
+        Section("Solidarity Fundr") {
+            LabeledContent("Version", value: appVersion)
+            LabeledContent("Developer", value: "Bob Kitchen")
+            if let createdAt = dataManager.fundSettings?.createdAt {
+                LabeledContent("Fund Started", value: DateHelper.formatDate(createdAt))
+            }
+        }
+
+        Section {
+            NavigationLink {
+                DocumentationView()
+            } label: {
+                Label("Documentation", systemImage: "doc.text")
+            }
+        }
     }
 }
 
