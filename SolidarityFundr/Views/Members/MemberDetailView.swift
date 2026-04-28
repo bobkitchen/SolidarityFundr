@@ -167,10 +167,17 @@ struct MemberDetailView: View {
                 Text(member.name ?? "Unknown")
                     .font(.title.weight(.semibold))
 
+                // Status pill only renders when there's actually something
+                // to communicate (suspended / cashed-out / inactive).
+                // Stamping "Active" on every active member was no-info
+                // noise that was crowding the role text into wrapping —
+                // "House-keeper", "Ac-tive" — on iPhone column widths.
                 HStack(spacing: 8) {
                     Text(member.memberRole.displayName)
-                    Text("·")
-                    StatusBadge(status: member.memberStatus)
+                    if member.memberStatus != .active {
+                        Text("·")
+                        StatusBadge(status: member.memberStatus)
+                    }
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
