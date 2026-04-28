@@ -269,10 +269,9 @@ private struct MonthlyStatementPreview: View {
         StatementCalculator(asOf: month.endDate)
     }
 
-    /// Active members ranked by contributions DESC, tiebreak join date ASC.
-    /// Mirrors `PDFGenerator.drawSavingsStandings` so the preview shows
-    /// what the printout will show.
-    private var rankedMembers: [MemberRow] {
+    /// All active members alphabetically — used by the reference list.
+    /// Spotlights are computed separately below.
+    private var allMembers: [MemberRow] {
         dataManager.members
             .filter { calculator.wasActive($0) }
             .map { member in
@@ -280,20 +279,79 @@ private struct MonthlyStatementPreview: View {
                     name: member.name ?? "Unknown",
                     role: member.memberRole.displayName,
                     contributions: calculator.contributions(for: member),
-                    joinDate: member.joinDate
+                    joinDate: member.joinDate,
+                    paidThisMonth: calculator.contributedThisMonth(
+                        member,
+                        monthStart: month.startDate,
+                        monthEnd: month.endDate
+                    )
                 )
             }
-            .sorted { lhs, rhs in
-                if lhs.contributions != rhs.contributions {
-                    return lhs.contributions > rhs.contributions
-                }
-                switch (lhs.joinDate, rhs.joinDate) {
-                case (let l?, let r?): return l < r
-                case (.some, .none): return true
-                case (.none, .some): return false
-                case (.none, .none): return lhs.name < rhs.name
-                }
-            }
+            .sorted { $0.name < $1.name }
+    }
+
+    /// Mirrors `PDFGenerator.computeSpotlights` so the in-app preview
+    /// shows the exact same award winners as the printout.
+    private var spotlights: [SpotlightAwardViewModel] {
+        let activeMembers = dataManager.members.filter { calculator.wasActive($0) }
+        var awards: [SpotlightAwardViewModel] = []
+
+        // Top Saver
+        if let top = activeMembers.max(by: { lhs, rhs in
+            let lc = calculator.contributions(for: lhs)
+            let rc = calculator.contributions(for: rhs)
+            if lc != rc { return lc < rc }
+            return (lhs.joinDate ?? .distantFuture) > (rhs.joinDate ?? .distantFuture)
+        }), calculator.contributions(for: top) > 0 {
+            awards.append(.init(
+                category: .topSaver,
+                memberName: top.name ?? "Unknown",
+                primaryValue: CurrencyFormatter.shared.format(calculator.contributions(for: top)),
+                detail: top.memberRole.displayName
+            ))
+        }
+
+        // Most Consistent
+        let cands = activeMembers.filter { calculator.monthsExpected(for: $0) >= 2 }
+        if let best = cands.max(by: { calculator.consistencyRate(for: $0) < calculator.consistencyRate(for: $1) }),
+           calculator.consistencyRate(for: best) > 0 {
+            let actual = calculator.monthsContributed(for: best)
+            let expected = calculator.monthsExpected(for: best)
+            let pct = Int((calculator.consistencyRate(for: best) * 100).rounded())
+            awards.append(.init(
+                category: .mostConsistent,
+                memberName: best.name ?? "Unknown",
+                primaryValue: "\(pct)%",
+                detail: "\(actual) of \(expected) months"
+            ))
+        }
+
+        // Longest Streak
+        if let leader = activeMembers.max(by: { calculator.currentStreak(for: $0) < calculator.currentStreak(for: $1) }),
+           calculator.currentStreak(for: leader) >= 2 {
+            let n = calculator.currentStreak(for: leader)
+            awards.append(.init(
+                category: .longestStreak,
+                memberName: leader.name ?? "Unknown",
+                primaryValue: "\(n) months",
+                detail: "in a row"
+            ))
+        }
+
+        // Almost Free
+        if let nearlyDone = activeLoanRows
+            .filter({ $0.percentRepaid >= 0.75 })
+            .max(by: { $0.percentRepaid < $1.percentRepaid }) {
+            let pct = Int((nearlyDone.percentRepaid * 100).rounded())
+            awards.append(.init(
+                category: .almostFree,
+                memberName: nearlyDone.memberName,
+                primaryValue: "\(pct)% repaid",
+                detail: "\(CurrencyFormatter.shared.format(nearlyDone.balance)) left"
+            ))
+        }
+
+        return awards
     }
 
     private var activeLoanRows: [LoanProgressViewModel] {
@@ -337,7 +395,11 @@ private struct MonthlyStatementPreview: View {
 
             heroBand
 
-            savingsStandings
+            if !spotlights.isEmpty {
+                spotlightsSection
+            }
+
+            memberReferenceList
 
             if !activeLoanRows.isEmpty {
                 loanProgress
@@ -372,46 +434,60 @@ private struct MonthlyStatementPreview: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: Savings standings
+    // MARK: Spotlights — four recognition awards
 
-    private var savingsStandings: some View {
-        let topThree = Array(rankedMembers.prefix(3))
-        let rest = Array(rankedMembers.dropFirst(3))
-
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("🏆  Savings Standings")
+    private var spotlightsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("🏆  This Month's Spotlights")
                 .font(.headline)
 
-            if !topThree.isEmpty {
-                HStack(spacing: 12) {
-                    ForEach(Array(topThree.enumerated()), id: \.offset) { idx, row in
-                        PodiumCard(rank: idx, row: row)
-                    }
+            HStack(spacing: 10) {
+                ForEach(Array(spotlights.enumerated()), id: \.offset) { _, award in
+                    SpotlightCard(award: award)
                 }
             }
+        }
+    }
 
-            if !rest.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(Array(rest.enumerated()), id: \.offset) { _, row in
-                        HStack {
-                            Text(row.name)
-                                .fontWeight(.medium)
-                            Text("·")
-                                .foregroundStyle(.secondary)
-                            Text(row.role)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(CurrencyFormatter.shared.format(row.contributions))
-                                .monospacedDigit()
-                        }
-                        .padding(.vertical, 9)
-                        .padding(.horizontal, 12)
-                        .font(.callout)
-                        .overlay(Divider(), alignment: .bottom)
+    // MARK: Member reference list — alphabetical, not a leaderboard
+
+    private var memberReferenceList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("All Members")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                ForEach(Array(allMembers.enumerated()), id: \.offset) { _, row in
+                    HStack {
+                        Text(row.name)
+                            .fontWeight(.medium)
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Text(row.role)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(row.paidThisMonth ? "✓" : "—")
+                            .fontWeight(.medium)
+                            .foregroundStyle(row.paidThisMonth ? .green : .secondary)
+                            .frame(width: 22)
+                        Text(CurrencyFormatter.shared.format(row.contributions))
+                            .monospacedDigit()
+                            .frame(width: 110, alignment: .trailing)
                     }
+                    .padding(.vertical, 9)
+                    .padding(.horizontal, 12)
+                    .font(.callout)
+                    .overlay(Divider(), alignment: .bottom)
                 }
-                .background(.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            HStack {
+                Spacer()
+                Text("✓ contributed in \(month.displayName)   ·   — no contribution recorded")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -459,6 +535,15 @@ private struct MonthlyStatementPreview: View {
         let role: String
         let contributions: Double
         let joinDate: Date?
+        let paidThisMonth: Bool
+    }
+
+    fileprivate struct SpotlightAwardViewModel: Identifiable {
+        let category: SpotlightAward.Category
+        let memberName: String
+        let primaryValue: String
+        let detail: String?
+        var id: String { category.title }
     }
 
     fileprivate struct LoanProgressViewModel {
@@ -473,41 +558,49 @@ private struct MonthlyStatementPreview: View {
     }
 }
 
-// MARK: - Podium card
+// MARK: - Spotlight card (one of the four monthly awards)
 
-private struct PodiumCard: View {
-    let rank: Int  // 0, 1, 2
-    let row: MonthlyStatementPreview.MemberRow
-
-    private var medal: String { ["🥇", "🥈", "🥉"][min(rank, 2)] }
+private struct SpotlightCard: View {
+    let award: MonthlyStatementPreview.SpotlightAwardViewModel
 
     private var bgTint: Color {
-        switch rank {
-        case 0: return Color.yellow.opacity(0.18)
-        case 1: return Color.gray.opacity(0.15)
-        case 2: return Color.orange.opacity(0.18)
-        default: return Color.gray.opacity(0.08)
+        switch award.category {
+        case .topSaver:       return Color.yellow.opacity(0.18)
+        case .mostConsistent: return Color.blue.opacity(0.14)
+        case .longestStreak:  return Color.orange.opacity(0.16)
+        case .almostFree:     return Color.green.opacity(0.14)
         }
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text(rank == 0 ? "👑  🥇" : medal)
-                .font(.system(size: 24))
-            Text(row.name)
+        VStack(alignment: .center, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(award.category.emoji)
+                Text(award.category.title.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(award.memberName)
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
-                .multilineTextAlignment(.center)
-            Text(row.role)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(CurrencyFormatter.shared.format(row.contributions))
+
+            Text(award.primaryValue)
                 .font(.headline)
                 .monospacedDigit()
-                .padding(.top, 2)
+
+            if let detail = award.detail {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, minHeight: 110)
+        .padding(.vertical, 14)
         .padding(.horizontal, 8)
         .background(bgTint)
         .clipShape(RoundedRectangle(cornerRadius: 12))

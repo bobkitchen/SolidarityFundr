@@ -35,12 +35,14 @@ struct MonthlyStatementSnapshot {
     let activeLoansCount: Int
     let memberRows: [MemberRow]
     let activeLoans: [LoanRow]
+    let spotlights: [SpotlightAward]
 
     struct MemberRow {
         let name: String
         let role: String
         let contributions: Double
-        let joinDate: Date?  // tiebreak for ranking
+        let joinDate: Date?
+        let paidThisMonth: Bool
     }
 
     struct LoanRow {
@@ -62,6 +64,47 @@ struct MonthlyStatementSnapshot {
             LoanProgressMarker.evaluate(percentRepaid: percentRepaid, isOverdue: isOverdue)
         }
     }
+}
+
+/// One of the four monthly recognition awards. Each award has a
+/// fixed slot in the spotlight row and a different math behind it,
+/// so different members can win each month even if one member
+/// dominates absolute totals.
+struct SpotlightAward {
+    enum Category {
+        case topSaver       // 👑 highest absolute contributions
+        case mostConsistent // 💎 highest months-paid / months-expected
+        case longestStreak  // 🔥 most consecutive months ending in statement month
+        case almostFree     // ✅ highest % loan repaid (≥ 75%)
+
+        var emoji: String {
+            switch self {
+            case .topSaver:       return "👑"
+            case .mostConsistent: return "💎"
+            case .longestStreak:  return "🔥"
+            case .almostFree:     return "✅"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .topSaver:       return "Top Saver"
+            case .mostConsistent: return "Most Consistent"
+            case .longestStreak:  return "Longest Streak"
+            case .almostFree:     return "Almost Free"
+            }
+        }
+    }
+
+    let category: Category
+    let memberName: String
+    let role: String
+    /// Pre-formatted for display ("KSH 33,000", "100% (10/10)",
+    /// "7 months", "84% repaid"). The calculator knows the units; the
+    /// renderer just paints the string.
+    let primaryValue: String
+    /// Optional second line ("Driver", "9/9 months", etc.). Drawn smaller.
+    let detail: String?
 }
 
 /// Progress emoji applied to a loan card. The order is exclusive:
@@ -176,7 +219,12 @@ final class PDFGenerator {
                 name: member.name ?? "Unknown",
                 role: member.memberRole.displayName,
                 contributions: calc.contributions(for: member),
-                joinDate: member.joinDate
+                joinDate: member.joinDate,
+                paidThisMonth: calc.contributedThisMonth(
+                    member,
+                    monthStart: month.startDate,
+                    monthEnd: month.endDate
+                )
             )
         }
 
@@ -209,6 +257,12 @@ final class PDFGenerator {
             }
             .sorted { $0.memberName < $1.memberName }
 
+        let spotlights = computeSpotlights(
+            activeMembers: activeMembers,
+            activeLoans: activeLoans,
+            calc: calc
+        )
+
         return MonthlyStatementSnapshot(
             month: month,
             fundBalance: calc.fundBalance(),
@@ -217,8 +271,87 @@ final class PDFGenerator {
             activeMembersCount: activeMembers.count,
             activeLoansCount: activeLoans.count,
             memberRows: memberRows,
-            activeLoans: activeLoans
+            activeLoans: activeLoans,
+            spotlights: spotlights
         )
+    }
+
+    /// Picks one winner per spotlight category, or omits the category
+    /// when nothing qualifies (e.g. no loan ≥ 75% repaid → no
+    /// "Almost Free" card that month).
+    @MainActor
+    private func computeSpotlights(activeMembers: [Member],
+                                   activeLoans: [MonthlyStatementSnapshot.LoanRow],
+                                   calc: StatementCalculator) -> [SpotlightAward] {
+        var awards: [SpotlightAward] = []
+
+        // Top Saver — highest absolute contributions, tiebreak by longer tenure.
+        if let top = activeMembers.max(by: { lhs, rhs in
+            let lc = calc.contributions(for: lhs)
+            let rc = calc.contributions(for: rhs)
+            if lc != rc { return lc < rc }
+            // Tiebreak: longer tenure (smaller joinDate) wins → so smaller is "greater"
+            return (lhs.joinDate ?? .distantFuture) > (rhs.joinDate ?? .distantFuture)
+        }), calc.contributions(for: top) > 0 {
+            awards.append(SpotlightAward(
+                category: .topSaver,
+                memberName: top.name ?? "Unknown",
+                role: top.memberRole.displayName,
+                primaryValue: CurrencyFormatter.shared.format(calc.contributions(for: top)),
+                detail: top.memberRole.displayName
+            ))
+        }
+
+        // Most Consistent — highest months-paid / months-expected.
+        // Require at least 2 months of tenure so a brand-new member with
+        // 1/1 doesn't trivially win.
+        let consistencyCandidates = activeMembers.filter { calc.monthsExpected(for: $0) >= 2 }
+        if let best = consistencyCandidates.max(by: {
+            calc.consistencyRate(for: $0) < calc.consistencyRate(for: $1)
+        }), calc.consistencyRate(for: best) > 0 {
+            let actual = calc.monthsContributed(for: best)
+            let expected = calc.monthsExpected(for: best)
+            let pct = Int((calc.consistencyRate(for: best) * 100).rounded())
+            awards.append(SpotlightAward(
+                category: .mostConsistent,
+                memberName: best.name ?? "Unknown",
+                role: best.memberRole.displayName,
+                primaryValue: "\(pct)%",
+                detail: "\(actual) of \(expected) months"
+            ))
+        }
+
+        // Longest Streak — most consecutive months of contribution.
+        // Require streak ≥ 2 to avoid "1 month" feeling like a win.
+        if let streakLeader = activeMembers.max(by: {
+            calc.currentStreak(for: $0) < calc.currentStreak(for: $1)
+        }), calc.currentStreak(for: streakLeader) >= 2 {
+            let n = calc.currentStreak(for: streakLeader)
+            awards.append(SpotlightAward(
+                category: .longestStreak,
+                memberName: streakLeader.name ?? "Unknown",
+                role: streakLeader.memberRole.displayName,
+                primaryValue: "\(n) months",
+                detail: "in a row"
+            ))
+        }
+
+        // Almost Free — highest % loan repaid, must be ≥ 75%.
+        if let nearlyDone = activeLoans
+            .filter({ $0.percentRepaid >= 0.75 })
+            .max(by: { $0.percentRepaid < $1.percentRepaid }) {
+            let pct = Int((nearlyDone.percentRepaid * 100).rounded())
+            let remaining = CurrencyFormatter.shared.format(nearlyDone.balance)
+            awards.append(SpotlightAward(
+                category: .almostFree,
+                memberName: nearlyDone.memberName,
+                role: "Loan",
+                primaryValue: "\(pct)% repaid",
+                detail: "\(remaining) left"
+            ))
+        }
+
+        return awards
     }
 
     @MainActor
@@ -308,9 +441,14 @@ final class PDFGenerator {
             y = drawHeader(in: rect, at: y, subtitle: "Statement for \(s.month.displayName)")
             y -= 18
             y = drawHeroBand(in: rect, at: y, snapshot: s)
-            y -= 24
+            y -= 22
 
-            y = drawSavingsStandings(in: rect, at: y, snapshot: s)
+            if !s.spotlights.isEmpty {
+                y = drawSpotlightRow(in: rect, at: y, awards: s.spotlights)
+                y -= 18
+            }
+
+            y = drawMemberReferenceList(in: rect, at: y, snapshot: s)
 
             if !s.activeLoans.isEmpty {
                 y -= 18
@@ -370,82 +508,56 @@ final class PDFGenerator {
         return y - 100
     }
 
-    // MARK: Monthly — Savings Standings (podium + list)
+    // MARK: Monthly — Spotlight row (four recognition awards)
 
-    private func drawSavingsStandings(in pageRect: CGRect, at yIn: CGFloat,
-                                      snapshot s: MonthlyStatementSnapshot) -> CGFloat {
+    private func drawSpotlightRow(in pageRect: CGRect, at yIn: CGFloat,
+                                  awards: [SpotlightAward]) -> CGFloat {
         var y = yIn
         let leftMargin: CGFloat = 40
 
-        // Section heading with trophy
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        "🏆  Savings Standings".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
+        "🏆  This Month's Spotlights".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
         y -= 26
 
-        // Rank: contributions DESC, tiebreak by joinDate ASC (longer-tenured first).
-        let ranked = s.memberRows.sorted { lhs, rhs in
-            if lhs.contributions != rhs.contributions {
-                return lhs.contributions > rhs.contributions
-            }
-            switch (lhs.joinDate, rhs.joinDate) {
-            case (let l?, let r?): return l < r
-            case (.some, .none): return true
-            case (.none, .some): return false
-            case (.none, .none): return lhs.name < rhs.name
-            }
+        let availableWidth = pageRect.width - leftMargin * 2
+        let spacing: CGFloat = 10
+        // Lay out exactly the awards we have. If a category was omitted
+        // (e.g. nobody ≥ 75% repaid → no "Almost Free" card), the row
+        // simply has fewer cards.
+        let count = max(awards.count, 1)
+        let cardWidth = (availableWidth - spacing * CGFloat(count - 1)) / CGFloat(count)
+        let cardHeight: CGFloat = 110
+
+        var x = leftMargin
+        for award in awards {
+            drawSpotlightCard(
+                at: CGRect(x: x, y: y - cardHeight, width: cardWidth, height: cardHeight),
+                award: award
+            )
+            x += cardWidth + spacing
         }
-
-        let topThree = Array(ranked.prefix(3))
-        let rest = Array(ranked.dropFirst(3))
-
-        // Podium
-        if !topThree.isEmpty {
-            let availableWidth = pageRect.width - leftMargin * 2
-            let spacing: CGFloat = 12
-            let cardCount = max(topThree.count, 1)
-            let cardWidth = (availableWidth - spacing * CGFloat(cardCount - 1)) / CGFloat(cardCount)
-            let cardHeight: CGFloat = 110
-
-            var x = leftMargin
-            for (index, row) in topThree.enumerated() {
-                drawPodiumCard(
-                    at: CGRect(x: x, y: y - cardHeight, width: cardWidth, height: cardHeight),
-                    rank: index,
-                    row: row
-                )
-                x += cardWidth + spacing
-            }
-            y -= cardHeight + 14
-        }
-
-        // Compact list for ranks 4+
-        if !rest.isEmpty {
-            for row in rest {
-                drawSecondaryRankRow(at: y, leftMargin: leftMargin, contentWidth: pageRect.width - leftMargin * 2, row: row)
-                y -= 22
-            }
-        }
-
-        return y
+        return y - cardHeight
     }
 
-    private func drawPodiumCard(at rect: CGRect, rank: Int, row: MonthlyStatementSnapshot.MemberRow) {
+    private func drawSpotlightCard(at rect: CGRect, award: SpotlightAward) {
         let cg = NSGraphicsContext.current?.cgContext
 
-        // Background tint based on rank
-        let bgColor: NSColor = {
-            switch rank {
-            case 0: return NSColor.systemYellow.withAlphaComponent(0.12)
-            case 1: return NSColor.systemGray.withAlphaComponent(0.10)
-            case 2: return NSColor(calibratedRed: 0.80, green: 0.50, blue: 0.20, alpha: 0.10)
-            default: return NSColor.systemGray.withAlphaComponent(0.05)
+        // Background tint per award category. Different hue makes the
+        // four cards feel like distinct awards rather than identical
+        // tiles.
+        let bg: NSColor = {
+            switch award.category {
+            case .topSaver:       return NSColor.systemYellow.withAlphaComponent(0.14)
+            case .mostConsistent: return NSColor.systemBlue.withAlphaComponent(0.10)
+            case .longestStreak:  return NSColor.systemOrange.withAlphaComponent(0.12)
+            case .almostFree:     return NSColor.systemGreen.withAlphaComponent(0.12)
             }
         }()
         cg?.saveGState()
-        cg?.setFillColor(bgColor.cgColor)
+        cg?.setFillColor(bg.cgColor)
         NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
         cg?.restoreGState()
 
@@ -455,89 +567,137 @@ final class PDFGenerator {
         NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).stroke()
         cg?.restoreGState()
 
-        // Medal row — crown only for #1, otherwise just the medal.
-        let medal: String = ["🥇", "🥈", "🥉"][min(rank, 2)]
-        let medalLine = rank == 0 ? "👑  🥇" : medal
-        let medalAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 22)
+        // Eyebrow: emoji + category label
+        let eyebrowAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: NSColor.darkGray,
+            .kern: 0.6
         ]
-        let medalSize = medalLine.size(withAttributes: medalAttrs)
-        medalLine.draw(
-            at: CGPoint(x: rect.midX - medalSize.width / 2, y: rect.maxY - 36),
-            withAttributes: medalAttrs
-        )
+        let eyebrow = "\(award.category.emoji)  \(award.category.title.uppercased())"
+        eyebrow.draw(at: CGPoint(x: rect.minX + 12, y: rect.maxY - 22), withAttributes: eyebrowAttrs)
 
-        // Name (centered)
+        // Member name (centered horizontally)
         let nameAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        let nameSize = row.name.size(withAttributes: nameAttrs)
-        row.name.draw(
-            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 44),
+        let nameSize = award.memberName.size(withAttributes: nameAttrs)
+        award.memberName.draw(
+            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 56),
             withAttributes: nameAttrs
         )
 
-        // Role (centered, secondary)
-        let roleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9),
-            .foregroundColor: NSColor.darkGray
-        ]
-        let roleSize = row.role.size(withAttributes: roleAttrs)
-        row.role.draw(
-            at: CGPoint(x: rect.midX - roleSize.width / 2, y: rect.minY + 30),
-            withAttributes: roleAttrs
-        )
-
-        // Amount (centered, larger)
-        let amountAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+        // Primary value
+        let valueAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        let amountStr = CurrencyFormatter.shared.format(row.contributions)
-        let amountSize = amountStr.size(withAttributes: amountAttrs)
-        amountStr.draw(
-            at: CGPoint(x: rect.midX - amountSize.width / 2, y: rect.minY + 10),
-            withAttributes: amountAttrs
+        let valueSize = award.primaryValue.size(withAttributes: valueAttrs)
+        award.primaryValue.draw(
+            at: CGPoint(x: rect.midX - valueSize.width / 2, y: rect.minY + 30),
+            withAttributes: valueAttrs
         )
+
+        // Detail line
+        if let detail = award.detail {
+            let detailAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.darkGray
+            ]
+            let detailSize = detail.size(withAttributes: detailAttrs)
+            detail.draw(
+                at: CGPoint(x: rect.midX - detailSize.width / 2, y: rect.minY + 12),
+                withAttributes: detailAttrs
+            )
+        }
     }
 
-    private func drawSecondaryRankRow(at y: CGFloat, leftMargin: CGFloat,
-                                      contentWidth: CGFloat,
-                                      row: MonthlyStatementSnapshot.MemberRow) {
-        let nameAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+    // MARK: Monthly — Member reference list (every active member, compact)
+
+    private func drawMemberReferenceList(in pageRect: CGRect, at yIn: CGFloat,
+                                         snapshot s: MonthlyStatementSnapshot) -> CGFloat {
+        var y = yIn
+        let leftMargin: CGFloat = 40
+        let contentWidth = pageRect.width - leftMargin * 2
+
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        row.name.draw(at: CGPoint(x: leftMargin + 8, y: y - 14), withAttributes: nameAttrs)
+        "All Members".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
+        y -= 22
 
-        let roleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10),
+        // Sort alphabetically — not a leaderboard, this section is for
+        // reference. The recipient should be able to find their row fast.
+        let sorted = s.memberRows.sorted { $0.name < $1.name }
+
+        for row in sorted {
+            // Faint zebra
+            // (no zebra here — keeps the list quieter, the spotlights are the
+            // visually noisy bit. Just a thin divider.)
+
+            let nameAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: NSColor.black
+            ]
+            row.name.draw(at: CGPoint(x: leftMargin + 8, y: y - 13), withAttributes: nameAttrs)
+
+            let roleAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10),
+                .foregroundColor: NSColor.darkGray
+            ]
+            row.role.draw(at: CGPoint(x: leftMargin + 180, y: y - 13), withAttributes: roleAttrs)
+
+            // Paid-this-month indicator (✓ green / — gray) sits left of the amount.
+            let indicator = row.paidThisMonth ? "✓" : "—"
+            let indicatorAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: row.paidThisMonth ? NSColor.systemGreen : NSColor.systemGray
+            ]
+            let indicatorPara = NSMutableParagraphStyle()
+            indicatorPara.alignment = .right
+            var iAttrs = indicatorAttrs
+            iAttrs[.paragraphStyle] = indicatorPara
+            let indicatorRect = CGRect(x: leftMargin + contentWidth - 200, y: y - 13, width: 60, height: 13)
+            indicator.draw(in: indicatorRect, withAttributes: iAttrs)
+
+            // Total contributed
+            let amountAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.black
+            ]
+            let amountPara = NSMutableParagraphStyle()
+            amountPara.alignment = .right
+            var aAttrs = amountAttrs
+            aAttrs[.paragraphStyle] = amountPara
+            let amountRect = CGRect(x: leftMargin + contentWidth - 130, y: y - 13, width: 130 - 4, height: 13)
+            CurrencyFormatter.shared.format(row.contributions).draw(in: amountRect, withAttributes: aAttrs)
+
+            // Divider
+            let cg = NSGraphicsContext.current?.cgContext
+            cg?.saveGState()
+            cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.15).cgColor)
+            cg?.setLineWidth(0.5)
+            cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 18))
+            cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 18))
+            cg?.strokePath()
+            cg?.restoreGState()
+
+            y -= 22
+        }
+
+        // Legend — once, small, aligned right.
+        let legendAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8),
             .foregroundColor: NSColor.darkGray
         ]
-        row.role.draw(at: CGPoint(x: leftMargin + 180, y: y - 14), withAttributes: roleAttrs)
-
-        let amountAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: NSColor.black
-        ]
-        let para = NSMutableParagraphStyle()
-        para.alignment = .right
-        var attrs = amountAttrs
-        attrs[.paragraphStyle] = para
-        let amountStr = CurrencyFormatter.shared.format(row.contributions)
-        let amountRect = CGRect(x: leftMargin + contentWidth - 130, y: y - 14, width: 130 - 4, height: 14)
-        amountStr.draw(in: amountRect, withAttributes: attrs)
-
-        // Faint divider
-        let cg = NSGraphicsContext.current?.cgContext
-        cg?.saveGState()
-        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.18).cgColor)
-        cg?.setLineWidth(0.5)
-        cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 18))
-        cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 18))
-        cg?.strokePath()
-        cg?.restoreGState()
+        let legend = "✓ contributed in \(s.month.displayName)   ·   — no contribution recorded"
+        let legendSize = legend.size(withAttributes: legendAttrs)
+        legend.draw(
+            at: CGPoint(x: leftMargin + contentWidth - legendSize.width, y: y - 4),
+            withAttributes: legendAttrs
+        )
+        return y - 12
     }
 
     // MARK: Monthly — Loan Repayment Progress
