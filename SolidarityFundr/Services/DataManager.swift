@@ -54,6 +54,28 @@ class DataManager: ObservableObject {
                 self.fetchInitialData()
             }
             .store(in: &cancellables)
+
+        // CloudKit imports arrive as `.NSPersistentStoreRemoteChange`
+        // notifications. The viewContext silently merges them in (we set
+        // `automaticallyMergesChangesFromParent = true` on Persistence),
+        // but no `contextDidSave` fires for a remote merge — so our
+        // @Published arrays go stale. This was invisible on macOS because
+        // the local store was already populated from prior runs; iPhone's
+        // first-launch scenario surfaced it (Outstanding Loans card empty
+        // until the user re-triggered Recalculate or restarted).
+        //
+        // Debounced because remote-change can arrive in bursts during a
+        // heavy sync; we want one refetch at the end, not 20 mid-flight.
+        NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.fetchMembers()
+                self.fetchActiveLoans()
+                self.fetchAllLoans()
+                self.fetchRecentTransactions()
+            }
+            .store(in: &cancellables)
     }
     
     private func fetchInitialData() {
