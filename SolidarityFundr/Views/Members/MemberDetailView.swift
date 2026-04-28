@@ -34,6 +34,7 @@ struct MemberDetailView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showingFileImporter = false
     @State private var showingPhotosPicker = false
+    @State private var showingPhotoOptions = false
     @State private var isProcessingPhoto = false
 
     var body: some View {
@@ -200,16 +201,35 @@ struct MemberDetailView: View {
         }
     }
 
-    /// Tap-to-upload avatar. Tap reveals a small Menu offering both:
-    /// - "Choose File…" → `.fileImporter` for any image on disk
-    /// - "Choose from Photos…" → `PhotosPicker` for iCloud Photos
-    /// File is the primary path (less friction; no Photos.app round-trip
-    /// required for emailed JPGs / scans / screenshots), Photos stays as
-    /// a secondary affordance for users on the iCloud Photos workflow.
-    /// A small camera-overlay hint in the bottom-right makes the
-    /// affordance discoverable.
+    /// Tap-to-upload avatar. Click anywhere on the avatar opens a
+    /// `.confirmationDialog` that offers two paths:
+    /// - "Choose File…" — `.fileImporter` for any image on disk
+    /// - "Choose from Photos…" — `PhotosPicker` for iCloud Photos
+    /// Plus, when a photo is set, "Remove Photo".
+    ///
+    /// The previous `Menu` wrapper collapsed the custom 64pt label
+    /// into default Menu button chrome, rendering the avatar tiny and
+    /// adding a "Change photo" tooltip-as-text artifact.
+    /// `Button + .confirmationDialog` keeps the custom label intact.
     private var avatarPicker: some View {
-        Menu {
+        VStack(spacing: 6) {
+            Button {
+                showingPhotoOptions = true
+            } label: {
+                avatarWithCameraOverlay
+            }
+            .buttonStyle(.plain)
+            .help(member.photoData == nil ? "Add a photo" : "Change photo")
+
+            // Always-visible text affordance so the upload action is
+            // discoverable without having to hover or guess.
+            Text(member.photoData == nil ? "Add Photo" : "Change Photo")
+                .font(.caption)
+                .foregroundStyle(BrandColor.avocado)
+        }
+        .confirmationDialog("Member Photo",
+                            isPresented: $showingPhotoOptions,
+                            titleVisibility: .hidden) {
             Button {
                 showingFileImporter = true
             } label: {
@@ -218,40 +238,15 @@ struct MemberDetailView: View {
             Button {
                 showingPhotosPicker = true
             } label: {
-                Label("Choose from Photos…", systemImage: "photo.on.rectangle")
+                Label("From Photos Library…", systemImage: "photo.on.rectangle")
             }
             if member.photoData != nil {
-                Divider()
-                Button(role: .destructive) {
+                Button("Remove Photo", role: .destructive) {
                     removeCurrentPhoto()
-                } label: {
-                    Label("Remove Photo", systemImage: "trash")
                 }
             }
-        } label: {
-            ZStack(alignment: .bottomTrailing) {
-                MemberAvatar(member: member, size: 64)
-
-                Image(systemName: "camera.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.white)
-                    .padding(5)
-                    .background(BrandColor.avocado, in: Circle())
-                    .overlay(Circle().stroke(.background, lineWidth: 2))
-                    .opacity(isProcessingPhoto ? 0.4 : 1)
-                    .offset(x: 2, y: 2)
-
-                if isProcessingPhoto {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(2)
-                }
-            }
+            Button("Cancel", role: .cancel) {}
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Change photo")
         .photosPicker(isPresented: $showingPhotosPicker,
                       selection: $photoPickerItem,
                       matching: .images,
@@ -264,6 +259,41 @@ struct MemberDetailView: View {
                       allowedContentTypes: [.image],
                       allowsMultipleSelection: false) { result in
             handleFileImporter(result)
+        }
+    }
+
+    /// Avatar with a prominent avocado camera badge in the bottom-right
+    /// when no photo is set, to invite the upload action. When a photo
+    /// is set, the badge is more subdued — the photo itself does the
+    /// work of being visible.
+    private var avatarWithCameraOverlay: some View {
+        ZStack(alignment: .bottomTrailing) {
+            MemberAvatar(member: member, size: 80)
+                .overlay(
+                    Circle()
+                        .strokeBorder(.separator, lineWidth: 0.5)
+                )
+
+            // Camera chip — louder when prompting for a first upload.
+            ZStack {
+                Circle()
+                    .fill(BrandColor.avocado)
+                    .frame(width: member.photoData == nil ? 28 : 24,
+                           height: member.photoData == nil ? 28 : 24)
+                    .overlay(Circle().stroke(.background, lineWidth: 2.5))
+                Image(systemName: "camera.fill")
+                    .font(.system(size: member.photoData == nil ? 13 : 11,
+                                  weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .opacity(isProcessingPhoto ? 0.4 : 1)
+            .offset(x: 2, y: 2)
+
+            if isProcessingPhoto {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(2)
+            }
         }
     }
 
