@@ -55,6 +55,14 @@ struct MemberDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(member.name ?? "Member Details")
+        // The page already shows the member's name prominently next to
+        // the avatar in identityHeader. The default large nav title on
+        // iPhone double-prints the same name in giant serif at the top.
+        // Inline display gives a small centred bar header that
+        // complements rather than competes with the in-page identity.
+        #if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             // Two primary actions in the toolbar (Mac-native pattern) — small,
             // text-only buttons. The previous full-width tile-card buttons in
@@ -363,21 +371,25 @@ struct MemberDetailView: View {
     private var heroMetrics: some View {
         GroupBox {
             HStack(alignment: .top, spacing: 0) {
+                // Labels are intentionally short. The "Total" prefix on
+                // "Total Contributions" was implicit — and at uppercase
+                // tracking on a 110pt iPhone column, it forced the label
+                // into a 2-line wrap with the second line truncating.
                 metricCell(
-                    label: "Total Contributions",
+                    label: "Contributions",
                     value: CurrencyFormatter.shared.format(member.totalContributions),
                     tint: .green
                 )
                 Divider().frame(height: 56)
                 metricCell(
-                    label: "Active Loan Balance",
+                    label: "Active Loan",
                     value: CurrencyFormatter.shared.format(member.totalActiveLoanBalance),
                     tint: member.hasActiveLoans ? .orange : .secondary,
                     muted: !member.hasActiveLoans
                 )
                 Divider().frame(height: 56)
                 metricCell(
-                    label: "Available to Borrow",
+                    label: "Available",
                     value: CurrencyFormatter.shared.format(member.maximumLoanAmount),
                     tint: member.maximumLoanAmount > 0 ? BrandColor.honey : .secondary,
                     muted: member.maximumLoanAmount == 0
@@ -776,13 +788,25 @@ struct LoanEligibilityCard: View {
 
 struct ContributionChartCard: View {
     let contributions: [MonthlyContribution]
-    
+
+    /// 12 months on Mac (wide detail pane has room) but only 6 on
+    /// iPhone — at phone-column width, 12 month labels truncate
+    /// uniformly to 2-3 chars and the bars become unreadably narrow.
+    /// The recent half-year is what the admin actually wants to see.
+    private var window: ArraySlice<MonthlyContribution> {
+        #if os(macOS)
+        return contributions.suffix(12)
+        #else
+        return contributions.suffix(6)
+        #endif
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Contribution History")
                 .font(.headline)
-            
-            Chart(contributions.suffix(12), id: \.monthKey) { contribution in
+
+            Chart(window, id: \.monthKey) { contribution in
                 BarMark(
                     x: .value("Month", contribution.displayMonth),
                     y: .value("Amount", contribution.amount)

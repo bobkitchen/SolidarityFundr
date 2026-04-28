@@ -285,13 +285,14 @@ struct OverviewView: View {
             PaymentFormView(viewModel: PaymentViewModel())
         }
         // The page already has its own "Habari" editorial header in-content,
-        // so on iPhone the nav-bar title is redundant — use inline display
-        // and match the tab's "Today" label. macOS keeps the wider
-        // "Overview" sidebar-driven title.
+        // so on iPhone the nav-bar title is redundant. Use inline display
+        // with an empty title — the tab bar already labels "Today" and
+        // the in-page header carries the heading weight. macOS keeps the
+        // wider "Overview" sidebar-driven title.
         #if os(macOS)
         .navigationTitle("Overview")
         #else
-        .navigationTitle("Today")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
@@ -491,28 +492,25 @@ struct OverviewView: View {
 
     @ViewBuilder
     private var secondaryMetrics: some View {
-        // 220pt minimum gives 1 column on iPhone (~360pt content area) and
-        // 3 columns on Mac. 140pt minimum drops iPhone to 2 columns
-        // (Members wraps to its own row) while Mac still gets 3.
+        // 140pt minimum gives 2 columns on iPhone (~360pt content area)
+        // and 3 on Mac. The Members card was dropped — its value
+        // ("Active Members 5") already appears in the Fund Balance hero
+        // strip's three inline stats, so this row repeating it added
+        // nothing. Brand-aligned tints replace the previous loud
+        // .blue/.orange that clashed with the avocado palette.
         let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
         LazyVGrid(columns: columns, spacing: 16) {
             MiniMetricCard(
                 title: "Total Contributions",
                 value: CurrencyFormatter.shared.format(dataManager.members.reduce(0) { $0 + $1.totalContributions }),
                 systemImage: "tray.and.arrow.down.fill",
-                tint: .blue
+                tint: BrandColor.olive
             )
             MiniMetricCard(
                 title: "Outstanding Loans",
                 value: CurrencyFormatter.shared.format(dataManager.activeLoans.reduce(0) { $0 + $1.balance }),
                 systemImage: "creditcard.fill",
-                tint: .orange
-            )
-            MiniMetricCard(
-                title: "Members",
-                value: "\(dataManager.members.count)",
-                systemImage: "person.3.fill",
-                tint: .green
+                tint: BrandColor.honey
             )
         }
     }
