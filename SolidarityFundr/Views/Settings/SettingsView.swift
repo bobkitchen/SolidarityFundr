@@ -333,6 +333,9 @@ struct DataSyncSettingsView: View {
     @State private var showingCloudKitDetails = false
     @State private var showingMessage = false
     @State private var alertMessage = ""
+    @State private var showingReconcileConfirmation = false
+    @State private var showingReconcileResult = false
+    @State private var reconcileResultMessage = ""
 
     var body: some View {
         // iCloud Sync — surfaces state. NSPersistentCloudKitContainer
@@ -410,6 +413,13 @@ struct DataSyncSettingsView: View {
             .help("Fixes transactions that don't match their payment type")
 
             Button {
+                showingReconcileConfirmation = true
+            } label: {
+                Label("Reconcile Ledger…", systemImage: "scalemass")
+            }
+            .help("Rebuilds the entire transaction ledger from Member, Loan, and Payment records. Use when the Fund Balance has drifted from what the underlying entities say.")
+
+            Button {
                 DataManager.shared.deleteTestUsers()
                 alertMessage = "Test users have been deleted"
                 showingMessage = true
@@ -437,6 +447,23 @@ struct DataSyncSettingsView: View {
         } message: {
             Text(alertMessage)
         }
+        .confirmationDialog(
+            "Reconcile ledger?",
+            isPresented: $showingReconcileConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reconcile", role: .destructive) {
+                runReconcileLedger()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes every Transaction record and rebuilds the ledger from Members, Loans, and Payments. Use this when the Fund Balance has drifted from what the underlying entities say. The action is recorded in History.")
+        }
+        .alert("Ledger reconciled", isPresented: $showingReconcileResult) {
+            Button("OK") {}
+        } message: {
+            Text(reconcileResultMessage)
+        }
     }
     
     private var syncStatusColor: Color {
@@ -455,7 +482,7 @@ struct DataSyncSettingsView: View {
     private func formatSyncTime(_ date: Date) -> String {
         let now = Date()
         let interval = now.timeIntervalSince(date)
-        
+
         if interval < 60 {
             return "just now"
         } else if interval < 3600 {
@@ -470,6 +497,31 @@ struct DataSyncSettingsView: View {
             formatter.timeStyle = .short
             return formatter.string(from: date)
         }
+    }
+
+    private func runReconcileLedger() {
+        do {
+            let report = try dataManager.reconcileLedger()
+            let drift = report.driftAmount
+            let driftLine: String
+            if abs(drift) < 0.01 {
+                driftLine = "No drift — the ledger already matched ground truth."
+            } else if drift < 0 {
+                driftLine = "Fund Balance corrected from \(CurrencyFormatter.shared.format(report.oldFundBalance)) → \(CurrencyFormatter.shared.format(report.newFundBalance)). The ledger was overstated by \(CurrencyFormatter.shared.format(-drift))."
+            } else {
+                driftLine = "Fund Balance corrected from \(CurrencyFormatter.shared.format(report.oldFundBalance)) → \(CurrencyFormatter.shared.format(report.newFundBalance)). The ledger was understated by \(CurrencyFormatter.shared.format(drift))."
+            }
+            reconcileResultMessage = """
+            \(driftLine)
+
+            \(report.transactionsDeleted) transactions removed, \
+            \(report.transactionsCreated) recreated from Members, Loans, and Payments. \
+            Recorded in History.
+            """
+        } catch {
+            reconcileResultMessage = "Reconciliation failed: \(error.localizedDescription)"
+        }
+        showingReconcileResult = true
     }
 }
 

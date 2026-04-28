@@ -957,6 +957,194 @@ class DataManager: ObservableObject {
             assertionFailure("Core Data save failed: \(error)")
         }
     }
+
+    // MARK: - Ledger Reconciliation
+    //
+    // The Transaction ledger is meant to be a derived view of the
+    // ground-truth Member / Loan / Payment entities. Edits over time can
+    // leave it inconsistent — a payment edited from 8,500 to 5,000 may
+    // leave the original 8,500 transaction still in the ledger, with no
+    // corresponding "fix" entry. This produces an overstated Fund Balance.
+    //
+    // `reconcileLedger()` deletes the entire Transaction set and
+    // rebuilds it from scratch using:
+    //
+    //   - For each `Loan`:           one `loanDisbursement` (at issueDate)
+    //   - For each `Payment`:        one `contribution` and/or `loanRepayment`
+    //   - For each cashed-out Member: one `cashOut`
+    //   - For interest applied:      one `interestApplied` (if non-zero)
+    //   - For Bob's net withdrawal:  one `bobWithdrawal` (if non-zero)
+    //
+    // Then `recalculateAllTransactionBalances()` runs to compute running
+    // fund / loan balances. The result: a clean ledger that exactly
+    // matches what the underlying entities say happened.
+
+    struct LedgerReconciliationReport {
+        let oldFundBalance: Double
+        let newFundBalance: Double
+        let transactionsDeleted: Int
+        let transactionsCreated: Int
+        var driftAmount: Double { newFundBalance - oldFundBalance }
+    }
+
+    @discardableResult
+    func reconcileLedger() throws -> LedgerReconciliationReport {
+        let oldBalance = FundCalculator.shared.calculateFundBalance()
+
+        // 1. Wipe existing transactions.
+        let txReq: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        let oldTransactions = try context.fetch(txReq)
+        let deletedCount = oldTransactions.count
+        for tx in oldTransactions {
+            context.delete(tx)
+        }
+        try context.save()
+
+        // 2. Collect every "real" event with its date, in chronological
+        // order. We hand each one to createTransaction so balances are
+        // computed sequentially against the running state.
+        var events: [(date: Date, post: () -> Void)] = []
+
+        // Loans → disbursements
+        let loanReq: NSFetchRequest<Loan> = Loan.fetchRequest()
+        let allLoans = try context.fetch(loanReq)
+        for loan in allLoans {
+            guard let issueDate = loan.issueDate else { continue }
+            let amount = loan.amount
+            let memberRef = loan.member
+            events.append((issueDate, {
+                _ = self.createTransaction(
+                    for: memberRef,
+                    amount: -amount,
+                    type: .loanDisbursement,
+                    description: "Loan issued: KSH \(Int(amount))",
+                    date: issueDate
+                )
+            }))
+        }
+
+        // Payments → contributions and/or loan repayments
+        let payReq: NSFetchRequest<Payment> = Payment.fetchRequest()
+        let allPayments = try context.fetch(payReq)
+        for payment in allPayments {
+            guard let date = payment.paymentDate else { continue }
+            let memberRef = payment.member
+            let contribAmt = payment.contributionAmount
+            let repayAmt = payment.loanRepaymentAmount
+
+            if contribAmt > 0 {
+                events.append((date, {
+                    _ = self.createTransaction(
+                        for: memberRef,
+                        amount: contribAmt,
+                        type: .contribution,
+                        description: "Monthly contribution",
+                        date: date
+                    )
+                }))
+            }
+            if repayAmt > 0 {
+                events.append((date, {
+                    _ = self.createTransaction(
+                        for: memberRef,
+                        amount: -repayAmt,
+                        type: .loanRepayment,
+                        description: "Loan payment: KSH \(Int(repayAmt))",
+                        date: date
+                    )
+                }))
+            }
+        }
+
+        // Cash-outs: each Member with a recorded cashOutAmount + date
+        let memReq: NSFetchRequest<Member> = Member.fetchRequest()
+        let allMembers = try context.fetch(memReq)
+        for member in allMembers where member.cashOutAmount > 0 {
+            let date = member.cashOutDate ?? Date()
+            let amount = member.cashOutAmount
+            let memberRef: Member? = member
+            events.append((date, {
+                _ = self.createTransaction(
+                    for: memberRef,
+                    amount: -amount,
+                    type: .cashOut,
+                    description: "Member cash out",
+                    date: date
+                )
+            }))
+        }
+
+        // Interest applied (single roll-up entry if non-zero)
+        if let settings = fundSettings, settings.totalInterestApplied > 0 {
+            let date = settings.lastInterestAppliedDate ?? Date()
+            let amount = settings.totalInterestApplied
+            events.append((date, {
+                _ = self.createTransaction(
+                    for: nil,
+                    amount: amount,
+                    type: .interestApplied,
+                    description: "Annual interest applied",
+                    date: date
+                )
+            }))
+        }
+
+        // Bob's net withdrawal (if any)
+        if let settings = fundSettings {
+            let withdrawn = settings.bobInitialInvestment - settings.bobRemainingInvestment
+            if withdrawn > 0 {
+                let date = settings.updatedAt ?? Date()
+                events.append((date, {
+                    _ = self.createTransaction(
+                        for: nil,
+                        amount: -withdrawn,
+                        type: .bobWithdrawal,
+                        description: "Bob withdrawal",
+                        date: date
+                    )
+                }))
+            }
+        }
+
+        // 3. Sort and post events in chronological order so each
+        // transaction's running balance picks up the correct previous
+        // state.
+        events.sort { $0.date < $1.date }
+        for event in events {
+            event.post()
+        }
+        let createdCount = events.count
+
+        try context.save()
+
+        // 4. Belt-and-braces: rerun balance recalculation so any rounding
+        // / ordering edge case is normalized.
+        recalculateAllTransactionBalances()
+        fetchActiveLoans()
+        fetchAllLoans()
+        fetchRecentTransactions()
+
+        let newBalance = FundCalculator.shared.calculateFundBalance()
+        let report = LedgerReconciliationReport(
+            oldFundBalance: oldBalance,
+            newFundBalance: newBalance,
+            transactionsDeleted: deletedCount,
+            transactionsCreated: createdCount
+        )
+
+        AuditLogger.shared.log(
+            event: .settingsChanged,
+            details: """
+            Ledger reconciled — \(deletedCount) transactions removed, \
+            \(createdCount) recreated from Member/Loan/Payment ground truth. \
+            Fund balance: \(Int(oldBalance)) → \(Int(newBalance)) \
+            (drift \(report.driftAmount >= 0 ? "+" : "")\(Int(report.driftAmount)))
+            """,
+            amount: report.driftAmount
+        )
+
+        return report
+    }
 }
 
 extension OSLog {
