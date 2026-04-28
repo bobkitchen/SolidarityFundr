@@ -111,6 +111,11 @@ struct CurrencyPill: View {
             Text(amount, format: .number)
                 .font(.system(size: size, weight: weight, design: design))
                 .monospacedDigit()
+                // On narrow widths (iPhone), large balances would wrap or
+                // clip. Keep a single line and shrink to fit if needed —
+                // imperceptible at desktop sizes.
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
     }
 }

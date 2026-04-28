@@ -276,7 +276,16 @@ struct OverviewView: View {
                 preselectedMember: target.member
             )
         }
+        // The page already has its own "Habari" editorial header in-content,
+        // so on iPhone the nav-bar title is redundant — use inline display
+        // and match the tab's "Today" label. macOS keeps the wider
+        // "Overview" sidebar-driven title.
+        #if os(macOS)
         .navigationTitle("Overview")
+        #else
+        .navigationTitle("Today")
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -338,31 +347,48 @@ struct OverviewView: View {
 
                 Divider()
 
-                HStack(spacing: 28) {
-                    inlineStat(
-                        label: "Utilization",
-                        value: String(format: "%.1f%%", utilization * 100),
-                        systemImage: "chart.pie",
-                        color: utilizationColor(utilization)
-                    )
-                    inlineStat(
-                        label: "Active Loans",
-                        value: "\(dataManager.activeLoans.count)",
-                        systemImage: "creditcard",
-                        color: BrandColor.honey
-                    )
-                    inlineStat(
-                        label: "Active Members",
-                        value: "\(dataManager.members.filter { $0.memberStatus == .active }.count)",
-                        systemImage: "person.2",
-                        color: BrandColor.olive
-                    )
-                    Spacer()
+                // ViewThatFits lets Mac keep the inline horizontal row and
+                // iPhone fall back to a wrapped 3-up grid when there isn't
+                // room for everything on a single line.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 28) {
+                        heroStats
+                        Spacer()
+                    }
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading)
+                    ], alignment: .leading, spacing: 12) {
+                        heroStats
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
+    }
+
+    @ViewBuilder
+    private var heroStats: some View {
+        inlineStat(
+            label: "Utilization",
+            value: String(format: "%.1f%%", utilization * 100),
+            systemImage: "chart.pie",
+            color: utilizationColor(utilization)
+        )
+        inlineStat(
+            label: "Active Loans",
+            value: "\(dataManager.activeLoans.count)",
+            systemImage: "creditcard",
+            color: BrandColor.honey
+        )
+        inlineStat(
+            label: "Active Members",
+            value: "\(dataManager.members.filter { $0.memberStatus == .active }.count)",
+            systemImage: "person.2",
+            color: BrandColor.olive
+        )
     }
 
     private func inlineStat(label: String, value: String, systemImage: String, color: Color) -> some View {
