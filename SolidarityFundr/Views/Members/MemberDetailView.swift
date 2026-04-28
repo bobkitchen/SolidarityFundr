@@ -437,53 +437,209 @@ struct FinancialSummaryCard: View {
     }
 }
 
+/// Live loan calculator. Shows the maximum amount this member could
+/// borrow right now (against role limit, fund headroom, and utilization
+/// threshold) and lets the admin try a specific amount + repayment-month
+/// combination to see the resulting monthly payment and fund-utilization
+/// impact. Recomputes on every dataManager publish, so adding a payment
+/// elsewhere updates the numbers next time you land on this page.
 struct LoanEligibilityCard: View {
     let member: Member
-    
+    @EnvironmentObject private var dataManager: DataManager
+
+    @State private var proposedAmount: Double = 0
+    @State private var proposedMonths: Int = 3
+    @State private var didInitialise = false
+
+    private var settings: FundSettings? { dataManager.fundSettings }
+
+    private var eligibility: LoanEligibility? {
+        guard let settings else { return nil }
+        return LoanEligibility.compute(
+            member: member,
+            settings: settings,
+            proposedAmount: proposedAmount > 0 ? proposedAmount : nil,
+            proposedMonths: proposedMonths
+        )
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Loan Eligibility")
-                .font(.headline)
-            
-            if member.isEligibleForLoan {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("Eligible for loans")
-                        .foregroundStyle(.green)
-                    Spacer()
-                }
-                
-                HStack {
-                    Text("Maximum Loan Amount")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(CurrencyFormatter.shared.format(member.maximumLoanAmount))
-                        .fontWeight(.medium)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Loan Eligibility")
+                    .font(.headline)
+                Spacer()
+                eligibilityBadge
+            }
+
+            if let eligibility {
+                if eligibility.isEligible {
+                    eligibleBody(eligibility)
+                } else {
+                    blockedBody(eligibility)
                 }
             } else {
-                HStack {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                    Text(eligibilityReason)
-                        .foregroundStyle(.red)
-                    Spacer()
-                }
+                Text("Fund settings unavailable.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding()
         .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-    
-    private var eligibilityReason: String {
-        if member.memberStatus != .active {
-            return "Member is not active"
-        } else if member.memberRole == .securityGuard && member.monthsAsMember < 3 {
-            return "Guards need 3 months of contributions"
-        } else {
-            return "Not eligible for loans"
+        .onAppear { initialiseIfNeeded() }
+        .onChange(of: member.objectID) { _, _ in
+            didInitialise = false
+            initialiseIfNeeded()
         }
+    }
+
+    // MARK: - Sub-views
+
+    @ViewBuilder
+    private var eligibilityBadge: some View {
+        if let e = eligibility {
+            if !e.isEligible {
+                Label("Blocked", systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if !e.warnings.isEmpty || (e.preview?.exceedsWarningThreshold == true) {
+                Label("Caution", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Label("Eligible", systemImage: "checkmark.seal.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func eligibleBody(_ e: LoanEligibility) -> some View {
+        // Max available — the headline number.
+        HStack(alignment: .firstTextBaseline) {
+            Text("Available now")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(CurrencyFormatter.shared.format(e.effectiveMax))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+        }
+
+        // Show which constraint is binding, so the admin understands *why*
+        // the available number is what it is.
+        if e.effectiveMax > 0 {
+            Text(bindingConstraintExplanation(e))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Divider()
+
+        // Calculator: amount + months → monthly payment + utilization impact.
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Try amount")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                TextField("Amount", value: $proposedAmount, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 120)
+                    .textFieldStyle(.roundedBorder)
+                    .monospacedDigit()
+                Text("KSH").foregroundStyle(.secondary)
+            }
+
+            if e.allowedRepaymentMonths.count > 1 {
+                Picker("Repay over", selection: $proposedMonths) {
+                    ForEach(e.allowedRepaymentMonths, id: \.self) { months in
+                        Text("\(months) months").tag(months)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } else if let only = e.allowedRepaymentMonths.first {
+                LabeledContent("Repay over") {
+                    Text("\(only) months").foregroundStyle(.secondary)
+                }
+            }
+
+            if let preview = e.preview, preview.amount > 0 {
+                LabeledContent("Monthly payment") {
+                    Text(CurrencyFormatter.shared.format(preview.monthlyPayment))
+                        .monospacedDigit()
+                        .fontWeight(.medium)
+                }
+
+                LabeledContent("Fund utilization") {
+                    HStack(spacing: 4) {
+                        Text(percentString(preview.utilizationBefore))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Image(systemName: "arrow.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(percentString(preview.utilizationAfter))
+                            .monospacedDigit()
+                            .foregroundStyle(preview.exceedsWarningThreshold ? .red : .primary)
+                    }
+                }
+            }
+        }
+
+        // Warnings, if any.
+        if !e.warnings.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(e.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockedBody(_ e: LoanEligibility) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(e.blockingReasons, id: \.self) { reason in
+                Label(reason, systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func initialiseIfNeeded() {
+        guard !didInitialise, let e = eligibility else { return }
+        proposedAmount = e.effectiveMax
+        if let first = e.allowedRepaymentMonths.first(where: { $0 == proposedMonths })
+            ?? e.allowedRepaymentMonths.first {
+            proposedMonths = first
+        }
+        didInitialise = true
+    }
+
+    private func percentString(_ value: Double) -> String {
+        String(format: "%.1f%%", value * 100)
+    }
+
+    private func bindingConstraintExplanation(_ e: LoanEligibility) -> String {
+        // Tell the admin which limit is currently the binding one.
+        let m = e.memberMaxAmount
+        let f = e.fundHeadroom
+        let u = e.utilizationCeiling
+        let effective = e.effectiveMax
+        if effective == m {
+            return "Bound by member's role limit and existing balance."
+        } else if effective == f {
+            return "Bound by fund minimum-balance buffer."
+        } else if effective == u {
+            return "Bound by utilization warning threshold."
+        }
+        return ""
     }
 }
 
