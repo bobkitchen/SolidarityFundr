@@ -9,6 +9,7 @@
 
 import SwiftUI
 import Charts
+import CoreData
 
 enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
     case overview, members, loans, payments, reports
@@ -243,8 +244,13 @@ private struct FundStatusSummary: View {
 struct OverviewView: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var isRecalculating = false
+    /// Member that the user wants to record a payment for, when triggered
+    /// from a "Record Payment" button on a Due/Overdue row. Drives a
+    /// sheet via `.sheet(item:)` so the right member is pre-filled.
+    @State private var paymentMember: PaymentTarget?
+
     /// Closure provided by `DashboardView` so the "View All" link in
-    /// Recent Transactions can switch the sidebar selection to .payments.
+    /// Recent Activity can switch the sidebar selection to .payments.
     var onViewAllTransactions: () -> Void = {}
 
     private var fundBalance: Double { dataManager.fundSettings?.calculateFundBalance() ?? 0 }
@@ -257,9 +263,15 @@ struct OverviewView: View {
                 heroFundBalance
                 fundBalanceSparkline
                 secondaryMetrics
-                recentTransactions
+                whatsDueSection
             }
             .padding()
+        }
+        .sheet(item: $paymentMember) { target in
+            PaymentFormView(
+                viewModel: PaymentViewModel(),
+                preselectedMember: target.member
+            )
         }
         .navigationTitle("Overview")
         .toolbar {
@@ -446,34 +458,133 @@ struct OverviewView: View {
         }
     }
 
+    // MARK: - What's Due
+    //
+    // Replaces the old "Recent Transactions" panel. Surfaces what needs
+    // attention today (overdue loans, payments due this week) with
+    // one-tap "Record Payment" actions, plus a slim 3-row recent-activity
+    // tail. Browsing the full transaction history lives in the Payments
+    // tab; the dashboard's job is to show what to *do* next.
+
+    private var overdueLoans: [Loan] {
+        dataManager.activeLoans.filter { $0.isOverdue }
+    }
+
+    private var dueThisWeekLoans: [Loan] {
+        let now = Date()
+        let weekFromNow = Calendar.current.date(byAdding: .day, value: 7, to: now) ?? now
+        return dataManager.activeLoans.filter { loan in
+            guard !loan.isOverdue,
+                  let nextDue = loan.nextPaymentDue else { return false }
+            return nextDue >= now && nextDue <= weekFromNow
+        }
+    }
+
     @ViewBuilder
-    private var recentTransactions: some View {
+    private var whatsDueSection: some View {
+        VStack(spacing: 16) {
+            if !overdueLoans.isEmpty {
+                dueGroup(
+                    title: "Overdue",
+                    systemImage: "exclamationmark.triangle.fill",
+                    accent: .red,
+                    loans: overdueLoans
+                )
+            }
+
+            if !dueThisWeekLoans.isEmpty {
+                dueGroup(
+                    title: "Due This Week",
+                    systemImage: "calendar.badge.clock",
+                    accent: .orange,
+                    loans: dueThisWeekLoans
+                )
+            }
+
+            if overdueLoans.isEmpty && dueThisWeekLoans.isEmpty {
+                allCaughtUpCard
+            }
+
+            recentActivityTail
+        }
+    }
+
+    private func dueGroup(title: String, systemImage: String, accent: Color, loans: [Loan]) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(loans) { loan in
+                    DueLoanRow(loan: loan, accent: accent) {
+                        if let m = loan.member {
+                            paymentMember = PaymentTarget(member: m)
+                        }
+                    }
+                    if loan != loans.last {
+                        Divider()
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(accent)
+                Text(title)
+                Spacer()
+                Text("\(loans.count)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var allCaughtUpCard: some View {
+        GroupBox {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("All caught up.")
+                        .font(.callout.weight(.semibold))
+                    Text("No overdue or upcoming loan payments this week.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var recentActivityTail: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("Recent Transactions")
-                        .font(.headline)
+                    Text("Recent Activity")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
                     Spacer()
                     if !dataManager.recentTransactions.isEmpty {
                         Button("View All", action: onViewAllTransactions)
                             .buttonStyle(.link)
-                            .font(.callout)
+                            .font(.caption)
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
 
                 if dataManager.recentTransactions.isEmpty {
-                    ContentUnavailableView(
-                        "No Transactions",
-                        systemImage: "leaf",
-                        description: Text("Transactions will appear here once members make payments or take loans.")
-                    )
-                    .frame(height: 200)
+                    Text("No activity yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 8)
                 } else {
+                    let recent = Array(dataManager.recentTransactions.prefix(3))
                     VStack(spacing: 0) {
-                        ForEach(dataManager.recentTransactions.prefix(10)) { transaction in
+                        ForEach(recent) { transaction in
                             TransactionRowView(transaction: transaction)
-                            if transaction != dataManager.recentTransactions.prefix(10).last {
+                            if transaction != recent.last {
                                 Divider()
                             }
                         }
@@ -488,6 +599,74 @@ struct OverviewView: View {
         if utilization >= 0.4 { return .orange }
         return .green
     }
+}
+
+// MARK: - DueLoanRow
+//
+// One row in an Overdue / Due-This-Week group. Shows the member, a
+// human-readable timing (e.g. "5 days overdue", "Due in 3 days"), the
+// outstanding balance, and a primary "Record Payment" button that opens
+// the payment sheet pre-filled for that member.
+
+struct DueLoanRow: View {
+    let loan: Loan
+    let accent: Color
+    let onRecordPayment: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(loan.member?.name ?? "Unknown")
+                    .font(.callout.weight(.medium))
+                Text(timingLabel)
+                    .font(.caption)
+                    .foregroundStyle(accent)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(CurrencyFormatter.shared.format(loan.balance))
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                Text("Balance")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(action: onRecordPayment) {
+                Label("Record Payment", systemImage: "plus.circle.fill")
+                    .labelStyle(.iconOnly)
+                    .font(.title3)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            .help("Record a payment for \(loan.member?.name ?? "this member")")
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var timingLabel: String {
+        if loan.isOverdue, let due = loan.dueDate {
+            let days = Calendar.current.dateComponents([.day], from: due, to: Date()).day ?? 0
+            if days <= 1 { return "Overdue by 1 day" }
+            return "Overdue by \(days) days"
+        }
+        if let next = loan.nextPaymentDue {
+            let days = Calendar.current.dateComponents([.day], from: Date(), to: next).day ?? 0
+            if days <= 0 { return "Due today" }
+            if days == 1 { return "Due tomorrow" }
+            return "Due in \(days) days"
+        }
+        return ""
+    }
+}
+
+/// Identifiable wrapper so the dashboard can drive a member-pre-filled
+/// PaymentFormView via `.sheet(item:)`.
+struct PaymentTarget: Identifiable {
+    let member: Member
+    var id: NSManagedObjectID { member.objectID }
 }
 
 // MARK: - MetricCard
