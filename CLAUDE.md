@@ -157,78 +157,6 @@ Must support importing from existing React prototype:
    - UI tests for critical user flows
    - Test iCloud sync scenarios
 
-## SMS Statement System
-
-### Overview
-The SMS statement system sends monthly summaries to members via SMS with a link to download their full PDF statement. The system is fully integrated and production-ready.
-
-### Architecture
-1. **SMS Service** (`SMSService.swift`): Protocol-based design supporting multiple providers
-   - Celcom Africa: KSH 0.25/SMS (recommended)
-   - Africa's Talking: KSH 0.80/SMS
-   - Phone validation for Kenya (+254 format)
-   - Time restrictions (8 AM - 8 PM EAT)
-
-2. **PDF Hosting** (`PDFHostingService.swift`): Cloudflare R2 integration
-   - Zero egress fees
-   - S3-compatible API
-   - Automatic file organization
-
-3. **URL Shortener** (`URLShortenerService.swift`): CloudKit-based
-   - Generates short links (e.g., sf.link/abc123)
-   - 30-day expiration
-   - Click tracking
-
-4. **Statement Service** (`StatementService.swift`): Orchestration layer
-   - Generates PDFs using existing PDFGenerator
-   - Uploads to R2
-   - Creates short URLs
-   - Sends SMS messages
-   - Tracks delivery status
-
-### SMS Message Format (160 characters)
-```
-SolidarityFund
-John Doe
-Contrib: KSH 24,000
-Loan Bal: KSH 12,500
-Next Due: 15/03/25
-Full stmt: sf.link/abc123
-```
-
-### Configuration Required
-1. **SMS Provider Setup**:
-   - Register with Celcom Africa or Africa's Talking
-   - Store API credentials in Keychain:
-     - `celcom_api_key` or `africastalking_api_key`
-     - `africastalking_username` (if using Africa's Talking)
-
-2. **Cloudflare R2 Setup**:
-   - Create R2 bucket
-   - Generate API credentials
-   - Store in Keychain:
-     - `r2_account_id`
-     - `r2_bucket_name`
-     - `r2_access_key_id`
-     - `r2_secret_access_key`
-     - `r2_public_url` (optional)
-
-3. **URL Shortener**:
-   - CloudKit automatically handles storage
-   - Configure custom domain (optional)
-
-### Usage
-1. **Enable in Settings**: Toggle SMS notifications and select provider
-2. **Member Opt-in**: Members must have valid phone numbers and opt-in
-3. **Automatic Scheduling**: Statements sent monthly on configured day
-4. **Manual Send**: Available in Settings for immediate delivery
-5. **Test Mode**: Send test SMS without generating actual statements
-
-### Cost Estimate
-For 50 members monthly:
-- Celcom Africa: 50 × KSH 0.25 = KSH 12.50/month (~KSH 150/year)
-- Africa's Talking: 50 × KSH 0.80 = KSH 40/month (~KSH 480/year)
-
 ## Current Project Status
 
 ### Implemented Features ✅
@@ -239,7 +167,6 @@ For 50 members monthly:
 5. **All Core Views**: Dashboard, Members, Loans, Payments, Reports, Settings
 6. **Data Import/Export**: JSON and CSV support
 7. **PDF Report Generation**: Member statements and fund reports
-8. **SMS Statement System**: Automated monthly SMS statements with PDF links
 
 ### Liquid Glass UI Implementation (macOS Tahoe 26)
 
