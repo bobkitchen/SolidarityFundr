@@ -13,7 +13,6 @@ struct MemberDetailView: View {
     @StateObject private var viewModel = MemberViewModel()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openLoanWindow) private var openLoanWindow
-    @State private var selectedTab: DetailTab = .overview
     @State private var showingEditSheet = false
     @State private var showingCashOutConfirmation = false
     @State private var showingNewLoan = false
@@ -24,33 +23,49 @@ struct MemberDetailView: View {
     @State private var newLoanPrefillAmount: Double?
     @State private var newLoanPrefillMonths: Int?
 
-    enum DetailTab: String, CaseIterable, Hashable {
-        case overview = "Overview"
-        case contributions = "Contributions"
-        case loans = "Loans"
-        case transactions = "Transactions"
-    }
-
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
-                memberHeaderCard
-                quickActionsCard
-
-                Picker("View", selection: $selectedTab) {
-                    ForEach(DetailTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
+            VStack(alignment: .leading, spacing: 24) {
+                identityHeader
+                heroMetrics
+                let contributions = viewModel.getMemberContributions(for: member)
+                if !contributions.isEmpty {
+                    ContributionChartCard(contributions: contributions)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-
-                tabContent
+                eligibilityElevated
+                contactInline
+                loanHistorySection
+                paymentHistorySection
             }
-            .padding(.vertical)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(member.name ?? "Member Details")
         .toolbar {
+            // Two primary actions in the toolbar (Mac-native pattern) — small,
+            // text-only buttons. The previous full-width tile-card buttons in
+            // the page body competed visually with the actual content.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingNewPayment = true
+                } label: {
+                    Label("Make Payment", systemImage: "plus.circle.fill")
+                }
+                .help("Record a contribution or loan repayment for \(member.name ?? "this member")")
+            }
+            if member.isEligibleForLoan {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        newLoanPrefillAmount = nil
+                        newLoanPrefillMonths = nil
+                        showingNewLoan = true
+                    } label: {
+                        Label("New Loan", systemImage: "creditcard.fill")
+                    }
+                    .help("Issue a new loan to \(member.name ?? "this member")")
+                }
+            }
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Button {
@@ -75,9 +90,6 @@ struct MemberDetailView: View {
                         }
                     }
 
-                    // Cash-out is now reachable from any non-cashedOut state
-                    // (no need to suspend first). Pre-flight check on active
-                    // loans happens inside the sheet itself.
                     if member.memberStatus != .cashedOut {
                         Button {
                             showingCashOutConfirmation = true
@@ -126,168 +138,224 @@ struct MemberDetailView: View {
         } message: {
             Text(viewModel.errorMessage ?? "An error occurred")
         }
-        // No refreshID hack: @ObservedObject member already publishes
-        // changes for KVO-backed Core Data properties, and the eligibility
-        // card observes DataManager directly, so adding a payment elsewhere
-        // updates this view without manual invalidation.
     }
 
-    // MARK: - View Components
+    // MARK: - Sections
 
-    /// Identity-only header. Financial summary and contribution counts
-    /// live in the Overview tab so they're not duplicated.
-    private var memberHeaderCard: some View {
-        VStack(spacing: 12) {
+    /// Compact identity header — single horizontal row. Avatar (real
+    /// per-member tint), name + role + status inline, tenure on the right.
+    /// Replaces the previous full-width centred panel that left ~150pt
+    /// of empty space above and below a tiny avatar.
+    private var identityHeader: some View {
+        HStack(alignment: .center, spacing: 16) {
             Image(systemName: "person.crop.circle.fill")
                 .resizable()
-                .frame(width: 64, height: 64)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(BrandColor.avatarTint(for: member.name))
+                .frame(width: 56, height: 56)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, BrandColor.avatarTint(for: member.name))
                 .accessibilityHidden(true)
 
-            Text(member.name ?? "Unknown")
-                .font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(member.name ?? "Unknown")
+                    .font(.title.weight(.semibold))
 
-            HStack(spacing: 8) {
-                Label(member.memberRole.displayName, systemImage: "briefcase.fill")
-                    .labelStyle(.titleAndIcon)
-                if member.memberStatus != .active {
-                    Text("•")
+                HStack(spacing: 8) {
+                    Text(member.memberRole.displayName)
+                    Text("·")
                     StatusBadge(status: member.memberStatus)
                 }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+
+            Spacer()
 
             if let joinDate = member.joinDate {
-                Text("Member since \(DateHelper.formatDate(joinDate))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-    }
-
-    private var quickActionsCard: some View {
-        HStack(spacing: 12) {
-            if member.isEligibleForLoan {
-                QuickActionButton(
-                    title: "New Loan",
-                    icon: "creditcard.fill",
-                    color: .blue
-                ) {
-                    newLoanPrefillAmount = nil
-                    newLoanPrefillMonths = nil
-                    showingNewLoan = true
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Member since")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.8)
+                    Text(joinDate, format: .dateTime.month(.abbreviated).year())
+                        .font(.callout.weight(.medium))
+                        .monospacedDigit()
+                    Text(tenureString(from: joinDate))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-
-            QuickActionButton(
-                title: "Make Payment",
-                icon: "dollarsign.circle.fill",
-                color: .green
-            ) {
-                showingNewPayment = true
-            }
         }
-        .padding(.horizontal)
     }
-    
+
+    /// Three-up at-a-glance metrics. The page's job in two seconds:
+    /// where does this member stand?
+    private var heroMetrics: some View {
+        GroupBox {
+            HStack(alignment: .top, spacing: 0) {
+                metricCell(
+                    label: "Total Contributions",
+                    value: CurrencyFormatter.shared.format(member.totalContributions),
+                    tint: .green
+                )
+                Divider().frame(height: 56)
+                metricCell(
+                    label: "Active Loan Balance",
+                    value: CurrencyFormatter.shared.format(member.totalActiveLoanBalance),
+                    tint: member.hasActiveLoans ? .orange : .secondary,
+                    muted: !member.hasActiveLoans
+                )
+                Divider().frame(height: 56)
+                metricCell(
+                    label: "Available to Borrow",
+                    value: CurrencyFormatter.shared.format(member.maximumLoanAmount),
+                    tint: member.maximumLoanAmount > 0 ? BrandColor.honey : .secondary,
+                    muted: member.maximumLoanAmount == 0
+                )
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func metricCell(label: String, value: String, tint: Color, muted: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+            Text(value)
+                .font(.system(.title2, design: .serif).weight(.semibold))
+                .foregroundStyle(muted ? .secondary : tint)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+    }
+
+    /// Eligibility card stays as the most actionable surface but is
+    /// visually elevated (its own GroupBox treatment is preserved).
+    private var eligibilityElevated: some View {
+        LoanEligibilityCard(member: member) { amount, months in
+            newLoanPrefillAmount = amount
+            newLoanPrefillMonths = months
+            showingNewLoan = true
+        }
+    }
+
+    /// Single inline row of contact details. Doesn't earn a card — three
+    /// reference fields can sit horizontally in the spacing budget that
+    /// a full GroupBox would consume vertically.
     @ViewBuilder
-    private var tabContent: some View {
-        switch selectedTab {
-        case .overview:      overviewTab
-        case .contributions: contributionsTab
-        case .loans:         loansTab
-        case .transactions:  transactionsTab
+    private var contactInline: some View {
+        if member.email != nil || member.phoneNumber != nil || member.lastStatementSentDate != nil {
+            HStack(spacing: 18) {
+                if let phone = member.phoneNumber {
+                    Label(phone, systemImage: "phone")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.secondary)
+                }
+                if let email = member.email {
+                    Label(email, systemImage: "envelope")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.secondary)
+                }
+                if let lastSent = member.lastStatementSentDate {
+                    Label("Statement sent \(DateHelper.formatShortDate(lastSent))",
+                          systemImage: "doc.text")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.secondary)
+                }
+                if member.smsOptIn,
+                   let phone = member.phoneNumber,
+                   PhoneNumberValidator.validate(phone) {
+                    Label("SMS enabled", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+            }
+            .font(.callout)
         }
     }
-    
-    // MARK: - Tab Views
-    
-    private var overviewTab: some View {
-        VStack(spacing: 16) {
-            if member.email != nil || member.phoneNumber != nil {
-                ContactInfoCard(member: member)
-            }
 
-            FinancialSummaryCard(member: member)
-
-            LoanEligibilityCard(member: member) { amount, months in
-                newLoanPrefillAmount = amount
-                newLoanPrefillMonths = months
-                showingNewLoan = true
-            }
-        }
-        .padding(.horizontal)
-    }
-    
-    private var contributionsTab: some View {
-        VStack(spacing: 16) {
-            // Contribution Chart
-            if !viewModel.getMemberContributions(for: member).isEmpty {
-                ContributionChartCard(
-                    contributions: viewModel.getMemberContributions(for: member)
-                )
-            }
-            
-            // Contribution History
-            ContributionHistoryList(member: member)
-        }
-        .padding(.horizontal)
-    }
-    
-    private var loansTab: some View {
-        VStack(spacing: 16) {
-            let loans = viewModel.getMemberLoanHistory(for: member)
-
+    @ViewBuilder
+    private var loanHistorySection: some View {
+        let loans = viewModel.getMemberLoanHistory(for: member)
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader(title: "Loans", count: loans.count)
             if loans.isEmpty {
-                ContentUnavailableView(
-                    "No Loans",
-                    systemImage: "creditcard.fill",
-                    description: Text("This member has not taken any loans yet")
-                )
-                .frame(height: 200)
+                Text("No loans on record.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             } else {
-                ForEach(loans) { loan in
-                    Button {
-                        if let loanID = loan.loanID {
-                            openLoanWindow(loanID)
+                VStack(spacing: 10) {
+                    ForEach(loans) { loan in
+                        Button {
+                            if let loanID = loan.loanID {
+                                openLoanWindow(loanID)
+                            }
+                        } label: {
+                            LoanCard(loan: loan)
                         }
-                    } label: {
-                        LoanCard(loan: loan)
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal)
     }
-    
-    private var transactionsTab: some View {
-        VStack(spacing: 16) {
-            let transactions = member.transactions?.allObjects as? [Transaction] ?? []
-            let sortedTransactions = transactions.sorted {
-                ($0.transactionDate ?? Date()) > ($1.transactionDate ?? Date())
-            }
-            
-            if sortedTransactions.isEmpty {
-                ContentUnavailableView(
-                    "No Transactions",
-                    systemImage: "list.bullet.rectangle",
-                    description: Text("No transactions recorded yet")
-                )
-                .frame(height: 200)
+
+    @ViewBuilder
+    private var paymentHistorySection: some View {
+        let transactions = (member.transactions?.allObjects as? [Transaction] ?? [])
+            .sorted { ($0.transactionDate ?? Date()) > ($1.transactionDate ?? Date()) }
+            .prefix(50)
+
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader(title: "Payments", count: transactions.count)
+            if transactions.isEmpty {
+                Text("No payments recorded yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             } else {
-                ForEach(sortedTransactions.prefix(50)) { transaction in
-                    TransactionRow(transaction: transaction)
+                VStack(spacing: 0) {
+                    ForEach(Array(transactions)) { transaction in
+                        TransactionRow(transaction: transaction)
+                    }
                 }
             }
         }
-        .padding(.horizontal)
+    }
+
+    private func sectionHeader(title: String, count: Int) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            if count > 0 {
+                Text("\(count)")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func tenureString(from joinDate: Date) -> String {
+        let months = Calendar.current.dateComponents([.month], from: joinDate, to: Date()).month ?? 0
+        if months < 1 { return "less than a month" }
+        if months == 1 { return "1 month" }
+        if months < 12 { return "\(months) months" }
+        let years = months / 12
+        let remainder = months % 12
+        if remainder == 0 {
+            return years == 1 ? "1 year" : "\(years) years"
+        }
+        return "\(years)y \(remainder)m"
     }
 }
 
