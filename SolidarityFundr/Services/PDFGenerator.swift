@@ -36,6 +36,7 @@ struct MonthlyStatementSnapshot {
     let memberRows: [MemberRow]
     let activeLoans: [LoanRow]
     let spotlights: [SpotlightAward]
+    let thisMonth: ThisMonthActivity
 
     struct MemberRow {
         let name: String
@@ -66,32 +67,29 @@ struct MonthlyStatementSnapshot {
     }
 }
 
-/// One of the four monthly recognition awards. Each award has a
-/// fixed slot in the spotlight row and a different math behind it,
-/// so different members can win each month even if one member
-/// dominates absolute totals.
+/// One of the two monthly recognition awards. v3 tried four awards
+/// including consistency- and streak-based ones, but those leaned on
+/// per-month payment dates which the historical data doesn't store
+/// reliably. v4 keeps only the two awards that work from cumulative
+/// state: Top Saver (absolute contributions) and Almost Free (loan
+/// repayment progress). Collective momentum is shown separately in
+/// the "This Month" stat strip.
 struct SpotlightAward {
     enum Category {
-        case topSaver       // 👑 highest absolute contributions
-        case mostConsistent // 💎 highest months-paid / months-expected
-        case longestStreak  // 🔥 most consecutive months ending in statement month
-        case almostFree     // ✅ highest % loan repaid (≥ 75%)
+        case topSaver   // 👑 highest absolute contributions
+        case almostFree // ✅ highest % loan repaid (≥ 75%)
 
         var emoji: String {
             switch self {
-            case .topSaver:       return "👑"
-            case .mostConsistent: return "💎"
-            case .longestStreak:  return "🔥"
-            case .almostFree:     return "✅"
+            case .topSaver:   return "👑"
+            case .almostFree: return "✅"
             }
         }
 
         var title: String {
             switch self {
-            case .topSaver:       return "Top Saver"
-            case .mostConsistent: return "Most Consistent"
-            case .longestStreak:  return "Longest Streak"
-            case .almostFree:     return "Almost Free"
+            case .topSaver:   return "Top Saver"
+            case .almostFree: return "Almost Free"
             }
         }
     }
@@ -99,11 +97,10 @@ struct SpotlightAward {
     let category: Category
     let memberName: String
     let role: String
-    /// Pre-formatted for display ("KSH 33,000", "100% (10/10)",
-    /// "7 months", "84% repaid"). The calculator knows the units; the
-    /// renderer just paints the string.
+    /// Pre-formatted for display ("KSH 33,000", "84% repaid"). Renderer
+    /// just paints the string.
     let primaryValue: String
-    /// Optional second line ("Driver", "9/9 months", etc.). Drawn smaller.
+    /// Optional second line drawn smaller below the primary value.
     let detail: String?
 }
 
@@ -263,6 +260,8 @@ final class PDFGenerator {
             calc: calc
         )
 
+        let thisMonth = calc.thisMonthActivity(monthStart: month.startDate, monthEnd: month.endDate)
+
         return MonthlyStatementSnapshot(
             month: month,
             fundBalance: calc.fundBalance(),
@@ -272,7 +271,8 @@ final class PDFGenerator {
             activeLoansCount: activeLoans.count,
             memberRows: memberRows,
             activeLoans: activeLoans,
-            spotlights: spotlights
+            spotlights: spotlights,
+            thisMonth: thisMonth
         )
     }
 
@@ -299,40 +299,6 @@ final class PDFGenerator {
                 role: top.memberRole.displayName,
                 primaryValue: CurrencyFormatter.shared.format(calc.contributions(for: top)),
                 detail: top.memberRole.displayName
-            ))
-        }
-
-        // Most Consistent — highest months-paid / months-expected.
-        // Require at least 2 months of tenure so a brand-new member with
-        // 1/1 doesn't trivially win.
-        let consistencyCandidates = activeMembers.filter { calc.monthsExpected(for: $0) >= 2 }
-        if let best = consistencyCandidates.max(by: {
-            calc.consistencyRate(for: $0) < calc.consistencyRate(for: $1)
-        }), calc.consistencyRate(for: best) > 0 {
-            let actual = calc.monthsContributed(for: best)
-            let expected = calc.monthsExpected(for: best)
-            let pct = Int((calc.consistencyRate(for: best) * 100).rounded())
-            awards.append(SpotlightAward(
-                category: .mostConsistent,
-                memberName: best.name ?? "Unknown",
-                role: best.memberRole.displayName,
-                primaryValue: "\(pct)%",
-                detail: "\(actual) of \(expected) months"
-            ))
-        }
-
-        // Longest Streak — most consecutive months of contribution.
-        // Require streak ≥ 2 to avoid "1 month" feeling like a win.
-        if let streakLeader = activeMembers.max(by: {
-            calc.currentStreak(for: $0) < calc.currentStreak(for: $1)
-        }), calc.currentStreak(for: streakLeader) >= 2 {
-            let n = calc.currentStreak(for: streakLeader)
-            awards.append(SpotlightAward(
-                category: .longestStreak,
-                memberName: streakLeader.name ?? "Unknown",
-                role: streakLeader.memberRole.displayName,
-                primaryValue: "\(n) months",
-                detail: "in a row"
             ))
         }
 
@@ -445,8 +411,11 @@ final class PDFGenerator {
 
             if !s.spotlights.isEmpty {
                 y = drawSpotlightRow(in: rect, at: y, awards: s.spotlights)
-                y -= 18
+                y -= 14
             }
+
+            y = drawThisMonthStrip(in: rect, at: y, snapshot: s)
+            y -= 18
 
             y = drawMemberReferenceList(in: rect, at: y, snapshot: s)
 
@@ -523,13 +492,11 @@ final class PDFGenerator {
         y -= 26
 
         let availableWidth = pageRect.width - leftMargin * 2
-        let spacing: CGFloat = 10
-        // Lay out exactly the awards we have. If a category was omitted
-        // (e.g. nobody ≥ 75% repaid → no "Almost Free" card), the row
-        // simply has fewer cards.
+        let spacing: CGFloat = 14
         let count = max(awards.count, 1)
         let cardWidth = (availableWidth - spacing * CGFloat(count - 1)) / CGFloat(count)
-        let cardHeight: CGFloat = 110
+        // v4 has at most 2 awards, so cards can be taller and roomier.
+        let cardHeight: CGFloat = 120
 
         var x = leftMargin
         for award in awards {
@@ -545,15 +512,12 @@ final class PDFGenerator {
     private func drawSpotlightCard(at rect: CGRect, award: SpotlightAward) {
         let cg = NSGraphicsContext.current?.cgContext
 
-        // Background tint per award category. Different hue makes the
-        // four cards feel like distinct awards rather than identical
-        // tiles.
+        // Background tint per award category — distinct hue keeps the
+        // two awards visually separable at a glance.
         let bg: NSColor = {
             switch award.category {
-            case .topSaver:       return NSColor.systemYellow.withAlphaComponent(0.14)
-            case .mostConsistent: return NSColor.systemBlue.withAlphaComponent(0.10)
-            case .longestStreak:  return NSColor.systemOrange.withAlphaComponent(0.12)
-            case .almostFree:     return NSColor.systemGreen.withAlphaComponent(0.12)
+            case .topSaver:   return NSColor.systemYellow.withAlphaComponent(0.14)
+            case .almostFree: return NSColor.systemGreen.withAlphaComponent(0.12)
             }
         }()
         cg?.saveGState()
@@ -569,27 +533,27 @@ final class PDFGenerator {
 
         // Eyebrow: emoji + category label
         let eyebrowAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.darkGray,
-            .kern: 0.6
+            .kern: 0.8
         ]
         let eyebrow = "\(award.category.emoji)  \(award.category.title.uppercased())"
-        eyebrow.draw(at: CGPoint(x: rect.minX + 12, y: rect.maxY - 22), withAttributes: eyebrowAttrs)
+        eyebrow.draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 24), withAttributes: eyebrowAttrs)
 
         // Member name (centered horizontally)
         let nameAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
         let nameSize = award.memberName.size(withAttributes: nameAttrs)
         award.memberName.draw(
-            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 56),
+            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 64),
             withAttributes: nameAttrs
         )
 
         // Primary value
         let valueAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 22, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
         let valueSize = award.primaryValue.size(withAttributes: valueAttrs)
@@ -601,7 +565,7 @@ final class PDFGenerator {
         // Detail line
         if let detail = award.detail {
             let detailAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9),
+                .font: NSFont.systemFont(ofSize: 10),
                 .foregroundColor: NSColor.darkGray
             ]
             let detailSize = detail.size(withAttributes: detailAttrs)
@@ -610,6 +574,58 @@ final class PDFGenerator {
                 withAttributes: detailAttrs
             )
         }
+    }
+
+    // MARK: Monthly — "This Month" stat strip
+
+    /// Collective momentum for the statement month. Uses values that
+    /// come from the user's actual entries dated in-window (no
+    /// historical-month-by-month dependency), so the strip is reliable
+    /// even when older payment dates are approximate.
+    private func drawThisMonthStrip(in pageRect: CGRect, at yIn: CGFloat,
+                                    snapshot s: MonthlyStatementSnapshot) -> CGFloat {
+        var y = yIn
+        let leftMargin: CGFloat = 40
+        let contentWidth = pageRect.width - leftMargin * 2
+        let stripHeight: CGFloat = 56
+
+        // Card background — light avocado tint to read as "team" not "individual"
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        let avocado = NSColor(calibratedRed: 0.42, green: 0.55, blue: 0.30, alpha: 0.10)
+        cg?.setFillColor(avocado.cgColor)
+        let rect = CGRect(x: leftMargin, y: y - stripHeight, width: contentWidth, height: stripHeight)
+        NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
+        cg?.restoreGState()
+
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.20).cgColor)
+        cg?.setLineWidth(0.5)
+        NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).stroke()
+        cg?.restoreGState()
+
+        // Eyebrow
+        let eyebrowAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: NSColor.darkGray,
+            .kern: 0.8
+        ]
+        "THIS MONTH".draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 18), withAttributes: eyebrowAttrs)
+
+        // Two lines, two stats each, separated by a middle dot.
+        let lineAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.black
+        ]
+        let m = s.thisMonth
+        let line1 = "\(CurrencyFormatter.shared.format(m.contributed)) contributed   ·   \(CurrencyFormatter.shared.format(m.repaid)) repaid"
+        let memberWord = m.contributingMembersCount == 1 ? "member" : "members"
+        let loanWord = m.newLoansCount == 1 ? "new loan" : "new loans"
+        let line2 = "\(m.contributingMembersCount) \(memberWord) contributed   ·   \(m.newLoansCount) \(loanWord)"
+        line1.draw(at: CGPoint(x: rect.minX + 14, y: rect.minY + 22), withAttributes: lineAttrs)
+        line2.draw(at: CGPoint(x: rect.minX + 14, y: rect.minY + 6), withAttributes: lineAttrs)
+
+        return y - stripHeight
     }
 
     // MARK: Monthly — Member reference list (every active member, compact)

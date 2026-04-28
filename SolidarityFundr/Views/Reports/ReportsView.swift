@@ -290,8 +290,7 @@ private struct MonthlyStatementPreview: View {
             .sorted { $0.name < $1.name }
     }
 
-    /// Mirrors `PDFGenerator.computeSpotlights` so the in-app preview
-    /// shows the exact same award winners as the printout.
+    /// Mirrors `PDFGenerator.computeSpotlights`.
     private var spotlights: [SpotlightAwardViewModel] {
         let activeMembers = dataManager.members.filter { calculator.wasActive($0) }
         var awards: [SpotlightAwardViewModel] = []
@@ -311,33 +310,6 @@ private struct MonthlyStatementPreview: View {
             ))
         }
 
-        // Most Consistent
-        let cands = activeMembers.filter { calculator.monthsExpected(for: $0) >= 2 }
-        if let best = cands.max(by: { calculator.consistencyRate(for: $0) < calculator.consistencyRate(for: $1) }),
-           calculator.consistencyRate(for: best) > 0 {
-            let actual = calculator.monthsContributed(for: best)
-            let expected = calculator.monthsExpected(for: best)
-            let pct = Int((calculator.consistencyRate(for: best) * 100).rounded())
-            awards.append(.init(
-                category: .mostConsistent,
-                memberName: best.name ?? "Unknown",
-                primaryValue: "\(pct)%",
-                detail: "\(actual) of \(expected) months"
-            ))
-        }
-
-        // Longest Streak
-        if let leader = activeMembers.max(by: { calculator.currentStreak(for: $0) < calculator.currentStreak(for: $1) }),
-           calculator.currentStreak(for: leader) >= 2 {
-            let n = calculator.currentStreak(for: leader)
-            awards.append(.init(
-                category: .longestStreak,
-                memberName: leader.name ?? "Unknown",
-                primaryValue: "\(n) months",
-                detail: "in a row"
-            ))
-        }
-
         // Almost Free
         if let nearlyDone = activeLoanRows
             .filter({ $0.percentRepaid >= 0.75 })
@@ -352,6 +324,11 @@ private struct MonthlyStatementPreview: View {
         }
 
         return awards
+    }
+
+    /// Mirrors `StatementCalculator.thisMonthActivity` for the preview.
+    private var thisMonthActivity: ThisMonthActivity {
+        calculator.thisMonthActivity(monthStart: month.startDate, monthEnd: month.endDate)
     }
 
     private var activeLoanRows: [LoanProgressViewModel] {
@@ -398,6 +375,8 @@ private struct MonthlyStatementPreview: View {
             if !spotlights.isEmpty {
                 spotlightsSection
             }
+
+            thisMonthStrip
 
             memberReferenceList
 
@@ -447,6 +426,35 @@ private struct MonthlyStatementPreview: View {
                 }
             }
         }
+    }
+
+    // MARK: This Month — collective momentum strip
+
+    private var thisMonthStrip: some View {
+        let m = thisMonthActivity
+        let memberWord = m.contributingMembersCount == 1 ? "member" : "members"
+        let loanWord = m.newLoansCount == 1 ? "new loan" : "new loans"
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("THIS MONTH")
+                .font(.caption2.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+            Text("\(CurrencyFormatter.shared.format(m.contributed)) contributed   ·   \(CurrencyFormatter.shared.format(m.repaid)) repaid")
+                .font(.callout)
+            Text("\(m.contributingMembersCount) \(memberWord) contributed   ·   \(m.newLoansCount) \(loanWord)")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 0.42, green: 0.55, blue: 0.30).opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
+        )
     }
 
     // MARK: Member reference list — alphabetical, not a leaderboard
@@ -565,10 +573,8 @@ private struct SpotlightCard: View {
 
     private var bgTint: Color {
         switch award.category {
-        case .topSaver:       return Color.yellow.opacity(0.18)
-        case .mostConsistent: return Color.blue.opacity(0.14)
-        case .longestStreak:  return Color.orange.opacity(0.16)
-        case .almostFree:     return Color.green.opacity(0.14)
+        case .topSaver:   return Color.yellow.opacity(0.18)
+        case .almostFree: return Color.green.opacity(0.16)
         }
     }
 

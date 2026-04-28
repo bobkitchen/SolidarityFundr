@@ -173,91 +173,10 @@ struct StatementCalculator {
         return members.filter(wasActive).count
     }
 
-    // MARK: Recognition math
-
-    /// Number of *distinct calendar months* between the member's join
-    /// month and `asOf`, inclusive. Floor of 1 so a brand-new member
-    /// doesn't divide by zero in `consistencyRate(for:)`.
-    func monthsExpected(for member: Member) -> Int {
-        guard let join = member.joinDate else { return 0 }
-        let cal = Calendar.current
-        let joinMonth = cal.dateInterval(of: .month, for: join)?.start ?? join
-        let asOfMonth = cal.dateInterval(of: .month, for: asOf)?.start ?? asOf
-        guard joinMonth <= asOfMonth else { return 0 }
-        let comps = cal.dateComponents([.month], from: joinMonth, to: asOfMonth)
-        return max(1, (comps.month ?? 0) + 1)
-    }
-
-    /// Distinct calendar months in which the member made any
-    /// contribution payment, between their join month and `asOf`.
-    func monthsContributed(for member: Member) -> Int {
-        let cal = Calendar.current
-        let payments = (member.payments?.allObjects as? [Payment]) ?? []
-        var months = Set<DateComponents>()
-        for p in payments {
-            guard p.contributionAmount > 0,
-                  let date = p.paymentDate,
-                  date <= asOf else { continue }
-            months.insert(cal.dateComponents([.year, .month], from: date))
-        }
-        return months.count
-    }
-
-    /// Fraction of expected months in which the member contributed.
-    /// Capped at 1.0 (a double-payment in one month doesn't credit you
-    /// for a month you didn't pay).
-    func consistencyRate(for member: Member) -> Double {
-        let expected = monthsExpected(for: member)
-        guard expected > 0 else { return 0 }
-        let actual = monthsContributed(for: member)
-        return min(1.0, Double(actual) / Double(expected))
-    }
-
-    /// Consecutive months of contribution counted backwards from the
-    /// statement month. Stops at the first month with no contribution.
-    /// `asOf` is treated as the most recent month — if the statement
-    /// month itself has no contribution yet, the streak is whatever
-    /// it was through the previous month.
-    func currentStreak(for member: Member) -> Int {
-        let cal = Calendar.current
-        let payments = (member.payments?.allObjects as? [Payment]) ?? []
-
-        // Index distinct (year, month) pairs the member has contributed in.
-        var paidMonths = Set<String>()
-        for p in payments {
-            guard p.contributionAmount > 0,
-                  let date = p.paymentDate, date <= asOf else { continue }
-            let comps = cal.dateComponents([.year, .month], from: date)
-            paidMonths.insert("\(comps.year ?? 0)-\(comps.month ?? 0)")
-        }
-
-        // Walk backwards from the statement month until we hit a miss.
-        var streak = 0
-        var cursor = asOf
-        while true {
-            let comps = cal.dateComponents([.year, .month], from: cursor)
-            let key = "\(comps.year ?? 0)-\(comps.month ?? 0)"
-            if paidMonths.contains(key) {
-                streak += 1
-                guard let prev = cal.date(byAdding: .month, value: -1, to: cursor) else { break }
-                cursor = prev
-            } else {
-                break
-            }
-        }
-
-        // Don't count months from before the member joined.
-        if let join = member.joinDate {
-            let joinComps = cal.dateComponents([.year, .month], from: join)
-            let asOfComps = cal.dateComponents([.year, .month], from: asOf)
-            let totalMonthsSinceJoin = ((asOfComps.year ?? 0) - (joinComps.year ?? 0)) * 12
-                + ((asOfComps.month ?? 0) - (joinComps.month ?? 0)) + 1
-            streak = min(streak, max(0, totalMonthsSinceJoin))
-        }
-        return streak
-    }
+    // MARK: Recognition math (this-month deltas)
 
     /// True if the member made any contribution in the statement month.
+    /// Used by the reference list's ✓/— indicator.
     func contributedThisMonth(_ member: Member, monthStart: Date, monthEnd: Date) -> Bool {
         let payments = (member.payments?.allObjects as? [Payment]) ?? []
         return payments.contains { p in
@@ -266,4 +185,57 @@ struct StatementCalculator {
             return date >= monthStart && date <= monthEnd
         }
     }
+
+    /// Aggregate "what happened in the fund this month" — the four
+    /// numbers that drive the spotlight strip.
+    ///
+    /// We do NOT use historical month-by-month payment dates for
+    /// recognition (the data has gaps where dates were entered
+    /// approximately or in batch), but the *current* statement month
+    /// is reliable: payments entered in the live app this month carry
+    /// the actual paymentDate. This aggregate sums only that window.
+    func thisMonthActivity(monthStart: Date, monthEnd: Date) -> ThisMonthActivity {
+        let allPayments = (try? context.fetch(Payment.fetchRequest())) ?? []
+
+        var contributed: Double = 0
+        var repaid: Double = 0
+        var contributingMembers = Set<UUID>()
+
+        for p in allPayments {
+            guard let date = p.paymentDate, date >= monthStart, date <= monthEnd else { continue }
+            if p.contributionAmount > 0 {
+                contributed += p.contributionAmount
+                if let id = p.member?.memberID {
+                    contributingMembers.insert(id)
+                }
+            }
+            if p.loanRepaymentAmount > 0 {
+                repaid += p.loanRepaymentAmount
+            }
+        }
+
+        let allLoans = (try? context.fetch(Loan.fetchRequest())) ?? []
+        let newLoans = allLoans.filter { loan in
+            guard let issued = loan.issueDate else { return false }
+            return issued >= monthStart && issued <= monthEnd
+        }
+
+        return ThisMonthActivity(
+            contributed: contributed,
+            repaid: repaid,
+            contributingMembersCount: contributingMembers.count,
+            newLoansCount: newLoans.count
+        )
+    }
+}
+
+/// "What happened this month" — drives the collective stat strip
+/// under the spotlight cards. All four values come from explicit
+/// entries dated within the statement month, so the numbers are
+/// reliable even though older historical dates may not be.
+struct ThisMonthActivity {
+    let contributed: Double
+    let repaid: Double
+    let contributingMembersCount: Int
+    let newLoansCount: Int
 }
