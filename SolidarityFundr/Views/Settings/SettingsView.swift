@@ -457,7 +457,7 @@ struct DataSyncSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This deletes every Transaction record and rebuilds the ledger from Members, Loans, and Payments. Use this when the Fund Balance has drifted from what the underlying entities say. The action is recorded in History.")
+            Text("Rebuilds the transaction ledger from Members, Loans, and Payments. Loan states stay as-is — no member is told their loan is reopened. Fund Balance stays the same. Any cash unaccounted for by the underlying entities is attributed to your capital. Recorded in History.")
         }
         .alert("Ledger reconciled", isPresented: $showingReconcileResult) {
             Button("OK") {}
@@ -502,20 +502,34 @@ struct DataSyncSettingsView: View {
     private func runReconcileLedger() {
         do {
             let report = try dataManager.reconcileLedger()
-            let drift = report.driftAmount
-            let driftLine: String
-            if abs(drift) < 0.01 {
-                driftLine = "No drift — the ledger already matched ground truth."
-            } else if drift < 0 {
-                driftLine = "Fund Balance corrected from \(CurrencyFormatter.shared.format(report.oldFundBalance)) → \(CurrencyFormatter.shared.format(report.newFundBalance)). The ledger was overstated by \(CurrencyFormatter.shared.format(-drift))."
-            } else {
-                driftLine = "Fund Balance corrected from \(CurrencyFormatter.shared.format(report.oldFundBalance)) → \(CurrencyFormatter.shared.format(report.newFundBalance)). The ledger was understated by \(CurrencyFormatter.shared.format(drift))."
-            }
-            reconcileResultMessage = """
-            \(driftLine)
+            let attribution = report.bobCapitalAdjustment
+            let balancePreserved = abs(report.oldFundBalance - report.newFundBalanceAfterAttribution) < 0.01
 
-            \(report.transactionsDeleted) transactions removed, \
-            \(report.transactionsCreated) recreated from Members, Loans, and Payments. \
+            let attributionLine: String
+            if abs(attribution) < 0.01 {
+                attributionLine = "No drift — the ledger already matched the underlying entities."
+            } else if attribution > 0 {
+                attributionLine = "Detected \(CurrencyFormatter.shared.format(attribution)) of cash that wasn't accounted for by Members, Loans, or Payments. Attributed to your capital — your stake increased from \(CurrencyFormatter.shared.format(report.bobRemainingInvestmentBefore)) to \(CurrencyFormatter.shared.format(report.bobRemainingInvestmentAfter))."
+            } else {
+                attributionLine = "Detected \(CurrencyFormatter.shared.format(-attribution)) of cash missing relative to the underlying entities. Recorded as a capital reduction — your stake went from \(CurrencyFormatter.shared.format(report.bobRemainingInvestmentBefore)) to \(CurrencyFormatter.shared.format(report.bobRemainingInvestmentAfter))."
+            }
+
+            let balanceLine = balancePreserved
+                ? "Fund Balance preserved at \(CurrencyFormatter.shared.format(report.newFundBalanceAfterAttribution))."
+                : "Fund Balance: \(CurrencyFormatter.shared.format(report.oldFundBalance)) → \(CurrencyFormatter.shared.format(report.newFundBalanceAfterAttribution))."
+
+            let perLoanLine = report.perLoanAdjustments > 0
+                ? "\(report.perLoanAdjustments) per-loan adjustment\(report.perLoanAdjustments == 1 ? "" : "s") posted to align granular payments with loan totals."
+                : "All per-loan payment chunks summed correctly to loan totals."
+
+            reconcileResultMessage = """
+            \(balanceLine)
+
+            \(attributionLine)
+
+            \(report.transactionsDeleted) old transactions removed, \(report.transactionsCreated) recreated.
+            \(perLoanLine)
+
             Recorded in History.
             """
         } catch {

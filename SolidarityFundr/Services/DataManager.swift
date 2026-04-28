@@ -962,34 +962,50 @@ class DataManager: ObservableObject {
     //
     // The Transaction ledger is meant to be a derived view of the
     // ground-truth Member / Loan / Payment entities. Edits over time can
-    // leave it inconsistent — a payment edited from 8,500 to 5,000 may
-    // leave the original 8,500 transaction still in the ledger, with no
-    // corresponding "fix" entry. This produces an overstated Fund Balance.
+    // leave it inconsistent — a payment edited or deleted may leave a
+    // stale transaction in the ledger, producing an overstated Fund
+    // Balance.
     //
-    // `reconcileLedger()` deletes the entire Transaction set and
-    // rebuilds it from scratch using:
+    // Reconcile rebuilds the ledger from authoritative entities while
+    // preserving:
+    //   - The current Fund Balance (real cash position).
+    //   - Loan state (no member is told their completed loan is
+    //     suddenly active again).
+    //   - Member contribution totals.
     //
-    //   - For each `Loan`:           one `loanDisbursement` (at issueDate)
-    //   - For each `Payment`:        one `contribution` and/or `loanRepayment`
-    //   - For each cashed-out Member: one `cashOut`
-    //   - For interest applied:      one `interestApplied` (if non-zero)
-    //   - For Bob's net withdrawal:  one `bobWithdrawal` (if non-zero)
-    //
-    // Then `recalculateAllTransactionBalances()` runs to compute running
-    // fund / loan balances. The result: a clean ledger that exactly
-    // matches what the underlying entities say happened.
+    // Strategy:
+    //   1. Wipe existing transactions.
+    //   2. Loans are authoritative for principal lent / repaid:
+    //      one `loanDisbursement` per Loan at issueDate, then per-loan
+    //      repayment entries from Payment records (preserving small-chunk
+    //      granularity). If a loan's payment chunks don't sum to
+    //      `loan.amount − loan.balance`, post a single per-loan
+    //      adjustment for the gap so loan state is preserved.
+    //   3. Payments are authoritative for contributions.
+    //   4. Members' cashOutAmount → cashOut transactions.
+    //   5. Settings → interest + Bob's recorded withdrawals.
+    //   6. Compute the rebuilt Fund Balance. The difference vs the old
+    //      balance is the cash you've topped up over time. Post a
+    //      `bobInvestment` for that amount, increasing
+    //      `bobRemainingInvestment` accordingly. Net effect: balance
+    //      preserved, capital correctly attributed.
 
     struct LedgerReconciliationReport {
         let oldFundBalance: Double
-        let newFundBalance: Double
+        let newFundBalanceBeforeAttribution: Double
+        let newFundBalanceAfterAttribution: Double
         let transactionsDeleted: Int
         let transactionsCreated: Int
-        var driftAmount: Double { newFundBalance - oldFundBalance }
+        let perLoanAdjustments: Int
+        let bobCapitalAdjustment: Double
+        let bobRemainingInvestmentBefore: Double
+        let bobRemainingInvestmentAfter: Double
     }
 
     @discardableResult
     func reconcileLedger() throws -> LedgerReconciliationReport {
         let oldBalance = FundCalculator.shared.calculateFundBalance()
+        let oldBobRemaining = fundSettings?.bobRemainingInvestment ?? 0
 
         // 1. Wipe existing transactions.
         let txReq: NSFetchRequest<Transaction> = Transaction.fetchRequest()
@@ -1000,63 +1016,96 @@ class DataManager: ObservableObject {
         }
         try context.save()
 
-        // 2. Collect every "real" event with its date, in chronological
-        // order. We hand each one to createTransaction so balances are
-        // computed sequentially against the running state.
+        // 2. Collect every reconstructible event with its date so we can
+        // post them chronologically (running balance computes correctly).
         var events: [(date: Date, post: () -> Void)] = []
+        var perLoanAdjustments = 0
 
-        // Loans → disbursements
-        let loanReq: NSFetchRequest<Loan> = Loan.fetchRequest()
-        let allLoans = try context.fetch(loanReq)
-        for loan in allLoans {
-            guard let issueDate = loan.issueDate else { continue }
-            let amount = loan.amount
-            let memberRef = loan.member
-            events.append((issueDate, {
+        // Contributions — Payment records are authoritative.
+        let payReq: NSFetchRequest<Payment> = Payment.fetchRequest()
+        let allPayments = try context.fetch(payReq)
+        for payment in allPayments where payment.contributionAmount > 0 {
+            guard let date = payment.paymentDate else { continue }
+            let memberRef = payment.member
+            let amt = payment.contributionAmount
+            events.append((date, {
                 _ = self.createTransaction(
                     for: memberRef,
-                    amount: -amount,
-                    type: .loanDisbursement,
-                    description: "Loan issued: KSH \(Int(amount))",
-                    date: issueDate
+                    amount: amt,
+                    type: .contribution,
+                    description: "Monthly contribution",
+                    date: date
                 )
             }))
         }
 
-        // Payments → contributions and/or loan repayments
-        let payReq: NSFetchRequest<Payment> = Payment.fetchRequest()
-        let allPayments = try context.fetch(payReq)
-        for payment in allPayments {
-            guard let date = payment.paymentDate else { continue }
-            let memberRef = payment.member
-            let contribAmt = payment.contributionAmount
-            let repayAmt = payment.loanRepaymentAmount
+        // Loans — disbursement at issueDate, plus per-loan repayments
+        // from Payment records, plus a single per-loan adjustment if
+        // the chunks don't sum to (amount − balance).
+        let loanReq: NSFetchRequest<Loan> = Loan.fetchRequest()
+        let allLoans = try context.fetch(loanReq)
+        for loan in allLoans {
+            guard let issueDate = loan.issueDate else { continue }
+            let principal = loan.amount
+            let memberRef = loan.member
 
-            if contribAmt > 0 {
+            // Disbursement
+            events.append((issueDate, {
+                _ = self.createTransaction(
+                    for: memberRef,
+                    amount: -principal,
+                    type: .loanDisbursement,
+                    description: "Loan issued: KSH \(Int(principal))",
+                    date: issueDate
+                )
+            }))
+
+            // Granular repayments from this loan's Payment records
+            let loanPayments = (loan.payments as? Set<Payment>) ?? []
+            var repaymentSum: Double = 0
+            for payment in loanPayments where payment.loanRepaymentAmount > 0 {
+                guard let date = payment.paymentDate else { continue }
+                let amt = payment.loanRepaymentAmount
+                repaymentSum += amt
                 events.append((date, {
                     _ = self.createTransaction(
                         for: memberRef,
-                        amount: contribAmt,
-                        type: .contribution,
-                        description: "Monthly contribution",
+                        amount: -amt,
+                        type: .loanRepayment,
+                        description: "Loan payment: KSH \(Int(amt))",
                         date: date
                     )
                 }))
             }
-            if repayAmt > 0 {
-                events.append((date, {
+
+            // Per-loan adjustment if granular sum ≠ what the loan says
+            // was repaid. Loan.balance is authoritative — it determines
+            // what staff see as still owed, and we never want to revise
+            // that downward (member would be told their loan is reopened).
+            let recordedRepaid = principal - loan.balance
+            let adjustment = recordedRepaid - repaymentSum
+            if abs(adjustment) > 0.01 {
+                perLoanAdjustments += 1
+                let adjDate: Date = {
+                    let lastPaymentDate = loanPayments
+                        .compactMap { $0.paymentDate }
+                        .max()
+                    return lastPaymentDate ?? loan.completedDate ?? Date()
+                }()
+                let memberName = memberRef?.name ?? "Unknown"
+                events.append((adjDate, {
                     _ = self.createTransaction(
                         for: memberRef,
-                        amount: -repayAmt,
+                        amount: -adjustment,
                         type: .loanRepayment,
-                        description: "Loan payment: KSH \(Int(repayAmt))",
-                        date: date
+                        description: "Adjustment to align with loan ledger (\(memberName))",
+                        date: adjDate
                     )
                 }))
             }
         }
 
-        // Cash-outs: each Member with a recorded cashOutAmount + date
+        // Member cash-outs
         let memReq: NSFetchRequest<Member> = Member.fetchRequest()
         let allMembers = try context.fetch(memReq)
         for member in allMembers where member.cashOutAmount > 0 {
@@ -1074,7 +1123,7 @@ class DataManager: ObservableObject {
             }))
         }
 
-        // Interest applied (single roll-up entry if non-zero)
+        // Interest applied (single roll-up if non-zero)
         if let settings = fundSettings, settings.totalInterestApplied > 0 {
             let date = settings.lastInterestAppliedDate ?? Date()
             let amount = settings.totalInterestApplied
@@ -1089,15 +1138,15 @@ class DataManager: ObservableObject {
             }))
         }
 
-        // Bob's net withdrawal (if any)
+        // Bob's previously-recorded net withdrawal (if any)
         if let settings = fundSettings {
-            let withdrawn = settings.bobInitialInvestment - settings.bobRemainingInvestment
-            if withdrawn > 0 {
+            let priorWithdrawn = settings.bobInitialInvestment - settings.bobRemainingInvestment
+            if priorWithdrawn > 0 {
                 let date = settings.updatedAt ?? Date()
                 events.append((date, {
                     _ = self.createTransaction(
                         for: nil,
-                        amount: -withdrawn,
+                        amount: -priorWithdrawn,
                         type: .bobWithdrawal,
                         description: "Bob withdrawal",
                         date: date
@@ -1106,41 +1155,81 @@ class DataManager: ObservableObject {
             }
         }
 
-        // 3. Sort and post events in chronological order so each
-        // transaction's running balance picks up the correct previous
-        // state.
+        // 3. Post events in chronological order so the running balance
+        // accumulates correctly as createTransaction looks up the prior tx.
         events.sort { $0.date < $1.date }
         for event in events {
             event.post()
         }
-        let createdCount = events.count
+        var createdCount = events.count
 
         try context.save()
-
-        // 4. Belt-and-braces: rerun balance recalculation so any rounding
-        // / ordering edge case is normalized.
         recalculateAllTransactionBalances()
+
+        let rebuiltBalance = FundCalculator.shared.calculateFundBalance()
+
+        // 4. Attribute the residual to Bob's capital.
+        // Cash is real (M-Pesa balance has been kept aligned); the
+        // residual represents top-ups Bob made when the math drifted.
+        let discrepancy = oldBalance - rebuiltBalance
+        var newBobRemaining = oldBobRemaining
+        if abs(discrepancy) > 0.01 {
+            // Positive discrepancy → Bob added more than the rebuilt
+            // ledger accounts for. bobInvestment increases the balance
+            // to match. Negative would be a withdrawal.
+            let attributionDate = Date()
+            if discrepancy > 0 {
+                createTransaction(
+                    for: nil,
+                    amount: discrepancy,
+                    type: .bobInvestment,
+                    description: "Capital top-up — reconciled from prior drift",
+                    date: attributionDate
+                )
+                newBobRemaining += discrepancy
+            } else {
+                createTransaction(
+                    for: nil,
+                    amount: -discrepancy, // pass positive magnitude; type handles sign
+                    type: .bobWithdrawal,
+                    description: "Capital reduction — reconciled from prior drift",
+                    date: attributionDate
+                )
+                newBobRemaining += discrepancy // discrepancy is negative
+            }
+            createdCount += 1
+            fundSettings?.bobRemainingInvestment = newBobRemaining
+            try context.save()
+            recalculateAllTransactionBalances()
+        }
+
         fetchActiveLoans()
         fetchAllLoans()
         fetchRecentTransactions()
 
-        let newBalance = FundCalculator.shared.calculateFundBalance()
+        let finalBalance = FundCalculator.shared.calculateFundBalance()
         let report = LedgerReconciliationReport(
             oldFundBalance: oldBalance,
-            newFundBalance: newBalance,
+            newFundBalanceBeforeAttribution: rebuiltBalance,
+            newFundBalanceAfterAttribution: finalBalance,
             transactionsDeleted: deletedCount,
-            transactionsCreated: createdCount
+            transactionsCreated: createdCount,
+            perLoanAdjustments: perLoanAdjustments,
+            bobCapitalAdjustment: discrepancy,
+            bobRemainingInvestmentBefore: oldBobRemaining,
+            bobRemainingInvestmentAfter: newBobRemaining
         )
 
         AuditLogger.shared.log(
             event: .settingsChanged,
             details: """
             Ledger reconciled — \(deletedCount) transactions removed, \
-            \(createdCount) recreated from Member/Loan/Payment ground truth. \
-            Fund balance: \(Int(oldBalance)) → \(Int(newBalance)) \
-            (drift \(report.driftAmount >= 0 ? "+" : "")\(Int(report.driftAmount)))
+            \(createdCount) recreated. Per-loan adjustments: \(perLoanAdjustments). \
+            Fund balance preserved at \(Int(finalBalance)). \
+            Bob capital: \(Int(oldBobRemaining)) → \(Int(newBobRemaining)) \
+            (\(discrepancy >= 0 ? "+" : "")\(Int(discrepancy)) attributed).
             """,
-            amount: report.driftAmount
+            amount: discrepancy
         )
 
         return report
