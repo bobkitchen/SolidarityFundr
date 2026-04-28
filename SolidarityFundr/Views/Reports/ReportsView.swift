@@ -11,6 +11,20 @@ import Charts
 import UniformTypeIdentifiers
 import PDFKit
 
+#if !os(macOS)
+// Reports rely on the AppKit-only PDF drawing pipeline. iPhone shows
+// a clean placeholder rather than carrying a parallel UIKit stack.
+struct ReportsView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "Reports are available on Mac",
+            systemImage: "doc.text",
+            description: Text("Open the fund on your Mac to generate and share PDF reports.")
+        )
+    }
+}
+#else
+
 struct ReportsView: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var selectedReportType = ReportType.fundOverview
@@ -1642,3 +1656,4 @@ struct ReportTypeButton: View {
     ReportsView()
         .environmentObject(DataManager.shared)
 }
+#endif

@@ -34,7 +34,7 @@ struct MembersListView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(NSColor.windowBackgroundColor))
+            .background(Color.primaryBackground)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Members list")
             .navigationTitle("Members")

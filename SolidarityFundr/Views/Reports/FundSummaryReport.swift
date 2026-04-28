@@ -8,6 +8,8 @@
 import SwiftUI
 import Charts
 
+#if os(macOS)
+
 struct FundSummaryReport: View {
     @EnvironmentObject var dataManager: DataManager
     @State private var isGeneratingPDF = false
@@ -398,3 +400,4 @@ private struct MetricCard: View {
     FundSummaryReport()
         .environmentObject(DataManager.shared)
 }
+#endif

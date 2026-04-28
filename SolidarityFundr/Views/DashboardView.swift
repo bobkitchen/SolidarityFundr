@@ -570,8 +570,14 @@ struct OverviewView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     if !dataManager.recentTransactions.isEmpty {
+                        // `.link` style is macOS-only; iPhone uses a
+                        // borderless tinted button which reads similarly.
                         Button("View All", action: onViewAllTransactions)
+                            #if os(macOS)
                             .buttonStyle(.link)
+                            #else
+                            .buttonStyle(.borderless)
+                            #endif
                             .font(.caption)
                     }
                 }

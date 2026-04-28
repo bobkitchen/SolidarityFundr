@@ -5,6 +5,14 @@
 //  Created on 7/19/25.
 //
 
+// PDF report generation is a macOS-only admin feature. The drawing
+// pipeline depends throughout on AppKit (NSGraphicsContext, NSImage,
+// NSFont, NSBezierPath, etc.). The iPhone target shows a "Reports
+// are available on Mac" placeholder rather than carrying a parallel
+// UIKit drawing stack.
+
+#if os(macOS)
+
 import Foundation
 import PDFKit
 import SwiftUI
@@ -1242,3 +1250,5 @@ extension DateFormatter {
         return formatter
     }()
 }
+
+#endif

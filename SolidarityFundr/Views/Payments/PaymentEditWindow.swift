@@ -7,6 +7,10 @@
 
 import SwiftUI
 
+// Window-based edit flow is macOS-only. iPhone presents the same
+// editing UI inline as a sheet from the payments list.
+#if os(macOS)
+
 struct PaymentEditWindow: View {
     let payment: Payment
     @StateObject private var viewModel = PaymentViewModel()
@@ -73,12 +77,6 @@ struct PaymentFormViewWrapper: View {
     }
 }
 
-// Notification for payment saved
-extension Notification.Name {
-    static let paymentSaved = Notification.Name("paymentSaved")
-    static let loanBalanceUpdated = Notification.Name("loanBalanceUpdated")
-}
-
 // Window management helper
 struct PaymentEditWindowController {
     static func openEditWindow(for payment: Payment, onSave: @escaping () -> Void) {
@@ -131,4 +129,12 @@ class WindowManager {
         }
         observerTokens[window] = token
     }
+}
+#endif
+
+// Notifications used by both platforms — must live outside the macOS
+// gate so iOS publishers/subscribers can reference them.
+extension Notification.Name {
+    static let paymentSaved = Notification.Name("paymentSaved")
+    static let loanBalanceUpdated = Notification.Name("loanBalanceUpdated")
 }

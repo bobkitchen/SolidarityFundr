@@ -31,7 +31,7 @@ struct LoansListView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(NSColor.windowBackgroundColor))
+            .background(Color.primaryBackground)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Loans list")
             .navigationTitle("Loans")

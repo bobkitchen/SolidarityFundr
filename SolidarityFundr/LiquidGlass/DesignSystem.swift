@@ -208,9 +208,16 @@ extension Color {
     static let secondaryText = Color.secondary
     static let tertiaryText = Color.secondary.opacity(0.6)
 
-    // Background Colors
+    // Background Colors. Different platforms expose system surface colours
+    // through different namespaces; both branches resolve to the same
+    // semantic role at runtime.
+    #if os(macOS)
     static let primaryBackground = Color(NSColor.windowBackgroundColor)
     static let secondaryBackground = Color(NSColor.controlBackgroundColor)
+    #else
+    static let primaryBackground = Color(uiColor: .systemBackground)
+    static let secondaryBackground = Color(uiColor: .secondarySystemBackground)
+    #endif
 
     // Glass-specific Colors
     static let glassStroke = Color.white.opacity(0.1)

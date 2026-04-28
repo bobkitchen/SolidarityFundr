@@ -7,6 +7,11 @@
 
 import Foundation
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 @MainActor
 class SessionManager: ObservableObject {
@@ -26,34 +31,49 @@ class SessionManager: ObservableObject {
     // MARK: - Session Management
     
     private func setupSessionManagement() {
-        // Monitor app lifecycle
+        // App lifecycle. macOS uses NSApplication notifications, iOS uses
+        // UIApplication notifications — same behavioural intent (lock on
+        // backgrounding, refresh activity on foregrounding).
+        #if os(macOS)
+        let activeName = NSApplication.didBecomeActiveNotification
+        let resignName = NSApplication.didResignActiveNotification
+        #else
+        let activeName = UIApplication.didBecomeActiveNotification
+        let resignName = UIApplication.willResignActiveNotification
+        #endif
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(appDidBecomeActive),
-            name: NSApplication.didBecomeActiveNotification,
+            name: activeName,
             object: nil
         )
-        
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(appDidResignActive),
-            name: NSApplication.didResignActiveNotification,
+            name: resignName,
             object: nil
         )
-        
-        // Monitor user activity
+
+        // Global keyboard / mouse monitoring is macOS-only — there's no
+        // iOS equivalent, and iPhones get their auto-lock behaviour from
+        // OS-level backgrounding plus the in-view `.trackActivity()`
+        // modifier on user-driven views.
+        #if os(macOS)
         NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .mouseMoved, .leftMouseDown, .rightMouseDown]) { _ in
             Task { @MainActor in
                 self.updateActivity()
             }
         }
-        
+
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .mouseMoved, .leftMouseDown, .rightMouseDown]) { event in
             Task { @MainActor in
                 self.updateActivity()
             }
             return event
         }
+        #endif
     }
     
     // MARK: - Activity Tracking

@@ -34,7 +34,7 @@ struct PaymentsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(NSColor.windowBackgroundColor))
+            .background(Color.primaryBackground)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Payments list")
             .navigationTitle("Payments")
@@ -234,27 +234,31 @@ struct PaymentsView: View {
                         Label("Delete", systemImage: "trash")
                     }
                     
+                    // Edit-payment opens a separate macOS window via the
+                    // PaymentEditWindowController (AppKit-backed). iOS
+                    // gets an inline edit sheet in a follow-up Sprint 6
+                    // commit; for now, the edit affordance is mac-only.
+                    #if os(macOS)
                     Button {
-                        print("🔧 PaymentsView: Opening edit window for payment - \(payment.member?.name ?? "Unknown")")
                         PaymentEditWindowController.openEditWindow(for: payment) {
-                            // Refresh payments list when edit is complete
                             viewModel.loadPayments()
                         }
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
                     .tint(.blue)
+                    #endif
                 }
                 .contextMenu {
+                    #if os(macOS)
                     Button {
-                        print("🔧 PaymentsView: Opening edit window for payment - \(payment.member?.name ?? "Unknown")")
                         PaymentEditWindowController.openEditWindow(for: payment) {
-                            // Refresh payments list when edit is complete
                             viewModel.loadPayments()
                         }
                     } label: {
                         Label("Edit Payment", systemImage: "pencil")
                     }
+                    #endif
                     
                     Button {
                         selectedPayment = payment

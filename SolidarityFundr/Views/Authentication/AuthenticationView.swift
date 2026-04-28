@@ -175,7 +175,11 @@ struct AuthenticationView: View {
                     pinError = ""
                     authenticateWithBiometrics()
                 }
+                #if os(macOS)
                 .buttonStyle(.link)
+                #else
+                .buttonStyle(.borderless)
+                #endif
             }
         }
         .frame(maxWidth: 320)
