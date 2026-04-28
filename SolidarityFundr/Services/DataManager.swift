@@ -108,7 +108,18 @@ class DataManager: ObservableObject {
         fetchActiveLoans()
         fetchAllLoans()
         fetchRecentTransactions()
-        createMissingTransactions()
+        // Do NOT call createMissingTransactions() here. It is racy with
+        // CloudKit sync: when payments arrive before their inverse
+        // `transaction` relationship has finished syncing, every payment
+        // briefly looks "orphaned" and the function manufactures phantom
+        // transactions on top of records that already exist. We saw this
+        // explode the ledger to 900k+ on iPhone-then-Mac launches.
+        //
+        // The manual "Repair missing transactions" button in Settings is
+        // still available for the rare case where it's actually needed
+        // (e.g. truly orphaned payments after a corrupted import). Even
+        // that should only be run with the network disabled or after
+        // CloudKit sync has demonstrably settled.
     }
     
     // MARK: - Member Operations

@@ -406,14 +406,12 @@ struct DataSyncSettingsView: View {
         }
 
         Section {
-            Button {
-                dataManager.createMissingTransactions()
-                alertMessage = "Transaction linking process completed"
-                showingMessage = true
-            } label: {
-                Label("Fix Missing Transactions", systemImage: "link.badge.plus")
-            }
-            .help("Creates transaction records for any payments that don't have them")
+            // Removed "Fix Missing Transactions" button — it was the
+            // primary cause of phantom-transaction explosions during
+            // CloudKit sync (the function is racy when relationship
+            // records arrive after their parent payments). The repair
+            // logic still exists on DataManager for emergencies but is
+            // intentionally not wired to a UI button anymore.
 
             Button {
                 dataManager.fixIncorrectTransactions()
