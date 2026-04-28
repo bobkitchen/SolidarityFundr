@@ -252,6 +252,11 @@ struct OverviewView: View {
     /// sheet via `.sheet(item:)` so the right member is pre-filled.
     @State private var paymentMember: PaymentTarget?
 
+    /// iPhone-only quick-payment-entry sheet. The "+" toolbar button
+    /// opens the shared PaymentFormView with no member preselected so
+    /// the admin can pick + record in one flow.
+    @State private var showingQuickPayment = false
+
     /// Closure provided by `DashboardView` so the "View All" link in
     /// Recent Activity can switch the sidebar selection to .payments.
     var onViewAllTransactions: () -> Void = {}
@@ -276,6 +281,9 @@ struct OverviewView: View {
                 preselectedMember: target.member
             )
         }
+        .sheet(isPresented: $showingQuickPayment) {
+            PaymentFormView(viewModel: PaymentViewModel())
+        }
         // The page already has its own "Habari" editorial header in-content,
         // so on iPhone the nav-bar title is redundant — use inline display
         // and match the tab's "Today" label. macOS keeps the wider
@@ -287,6 +295,21 @@ struct OverviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            // iPhone: "+" Record Payment is the killer one-tap action —
+            // most common Today-tab task is recording a contribution.
+            // macOS doesn't surface this here since the dashboard is a
+            // browse surface there and Payments has its own tab.
+            #if !os(macOS)
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingQuickPayment = true
+                } label: {
+                    Label("Record Payment", systemImage: "plus.circle.fill")
+                }
+                .accessibilityLabel("Record payment")
+            }
+            #endif
+
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     isRecalculating = true

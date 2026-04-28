@@ -85,6 +85,25 @@ struct MembersListView: View {
         }
         #endif
     }
+
+    /// Platform-specific row entry. macOS opens a dedicated detail window
+    /// (multi-window workflow); iPhone pushes to MemberDetailView inside
+    /// the surrounding NavigationStack.
+    @ViewBuilder
+    private func memberRowEntry(for member: Member) -> some View {
+        #if os(macOS)
+        MemberRowView(member: member) {
+            openMemberDetail(member)
+        }
+        #else
+        NavigationLink {
+            MemberDetailView(member: member)
+        } label: {
+            MemberRowView(member: member) {}
+        }
+        .buttonStyle(.plain)
+        #endif
+    }
     
     // MARK: - View Components
     
@@ -180,9 +199,7 @@ struct MembersListView: View {
     private var membersList: some View {
         List {
             ForEach(viewModel.filteredMembers) { member in
-                MemberRowView(member: member) {
-                    openMemberDetail(member)
-                }
+                memberRowEntry(for: member)
                 .contextMenu {
                     Button {
                         openMemberDetail(member)
