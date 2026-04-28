@@ -56,13 +56,13 @@ struct DashboardView: View {
         }
         .frame(minWidth: 900, minHeight: 640)
         #else
-        TabView(selection: $selection) {
-            ForEach(DashboardSection.allCases) { section in
-                detailContent(for: section)
-                    .tabItem { Label(section.title, systemImage: section.systemImage) }
-                    .tag(Optional(section))
-            }
-        }
+        // iPhone shell: three focused tabs — Today / Members / Settings.
+        // The Mac surfaces six sidebar entries because the work model on
+        // desktop is "audit, generate reports, deep-dive". The phone work
+        // model is "see what needs attention, look up a member, record a
+        // payment", so Loans / Payments / Reports / History are reachable
+        // through Members or stay Mac-only (Reports, History) for now.
+        iPhoneRootView()
         #endif
     }
 
