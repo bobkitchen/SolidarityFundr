@@ -304,7 +304,11 @@ struct OverviewView: View {
                 Button {
                     showingQuickPayment = true
                 } label: {
-                    Label("Record Payment", systemImage: "plus.circle.fill")
+                    // Plain SF Symbol (not `.circle.fill`) to match
+                    // adjacent toolbar items — iOS renders the toolbar's
+                    // own pill background for both, and pre-circled
+                    // glyphs read as a circle-inside-a-circle.
+                    Label("Record Payment", systemImage: "plus")
                 }
                 .accessibilityLabel("Record payment")
             }
@@ -487,7 +491,10 @@ struct OverviewView: View {
 
     @ViewBuilder
     private var secondaryMetrics: some View {
-        let columns = [GridItem(.adaptive(minimum: 220), spacing: 16)]
+        // 220pt minimum gives 1 column on iPhone (~360pt content area) and
+        // 3 columns on Mac. 140pt minimum drops iPhone to 2 columns
+        // (Members wraps to its own row) while Mac still gets 3.
+        let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
         LazyVGrid(columns: columns, spacing: 16) {
             MiniMetricCard(
                 title: "Total Contributions",

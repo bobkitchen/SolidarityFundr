@@ -63,7 +63,7 @@ struct MemberDetailView: View {
                 Button {
                     showingNewPayment = true
                 } label: {
-                    Label("Make Payment", systemImage: "plus.circle.fill")
+                    Label("Make Payment", systemImage: "plus")
                 }
                 .help("Record a contribution or loan repayment for \(member.name ?? "this member")")
             }
@@ -74,7 +74,7 @@ struct MemberDetailView: View {
                         newLoanPrefillMonths = nil
                         showingNewLoan = true
                     } label: {
-                        Label("New Loan", systemImage: "creditcard.fill")
+                        Label("New Loan", systemImage: "creditcard")
                     }
                     .help("Issue a new loan to \(member.name ?? "this member")")
                 }
@@ -120,7 +120,7 @@ struct MemberDetailView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "ellipsis")
                 }
             }
         }
@@ -174,11 +174,6 @@ struct MemberDetailView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-                // Compact contact line under the identity. Reference info
-                // sits where the eye already is, instead of floating in
-                // its own section between Eligibility and Loans.
-                contactLine
             }
 
             Spacer()
@@ -222,10 +217,13 @@ struct MemberDetailView: View {
             .help(member.photoData == nil ? "Add a photo" : "Change photo")
 
             // Always-visible text affordance so the upload action is
-            // discoverable without having to hover or guess.
+            // discoverable without having to hover or guess. Centred
+            // under the avatar disc so the column reads as one element.
             Text(member.photoData == nil ? "Add Photo" : "Change Photo")
                 .font(.caption)
                 .foregroundStyle(BrandColor.avocado)
+                .frame(maxWidth: 80)
+                .multilineTextAlignment(.center)
         }
         .confirmationDialog("Member Photo",
                             isPresented: $showingPhotoOptions,
@@ -353,41 +351,6 @@ struct MemberDetailView: View {
         try? PersistenceController.shared.container.viewContext.save()
     }
 
-    @ViewBuilder
-    private var contactLine: some View {
-        let parts: [(String, String)] = {
-            var result: [(String, String)] = []
-            if let phone = member.phoneNumber, !phone.isEmpty {
-                result.append(("phone", phone))
-            }
-            if let email = member.email, !email.isEmpty {
-                result.append(("envelope", email))
-            }
-            if let lastSent = member.lastStatementSentDate {
-                result.append(("doc.text", "Statement sent \(DateHelper.formatShortDate(lastSent))"))
-            }
-            return result
-        }()
-
-        if !parts.isEmpty {
-            HStack(spacing: 14) {
-                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
-                    Label(part.1, systemImage: part.0)
-                        .labelStyle(.titleAndIcon)
-                }
-                if member.smsOptIn,
-                   let phone = member.phoneNumber,
-                   PhoneNumberValidator.validate(phone) {
-                    Label("SMS", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.green)
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-    }
-
     /// Three-up at-a-glance metrics. The page's job in two seconds:
     /// where does this member stand?
     private var heroMetrics: some View {
@@ -424,13 +387,19 @@ struct MemberDetailView: View {
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.8)
+                .lineLimit(2, reservesSpace: false)
             Text(value)
                 .font(.system(.title2, design: .serif).weight(.semibold))
                 .foregroundStyle(muted ? .secondary : tint)
                 .monospacedDigit()
+                // On narrow widths (iPhone column), 3-up cells are ~120pt
+                // each — too tight for "KSH 33,000" at title2 serif. Shrink
+                // to fit instead of truncating with ellipsis.
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
     }
 
     /// Eligibility card stays as the most actionable surface but is
@@ -544,48 +513,6 @@ struct QuickActionButton: View {
             .background(color.opacity(0.1))
             .foregroundStyle(color)
             .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-    }
-}
-
-struct ContactInfoCard: View {
-    let member: Member
-
-    var body: some View {
-        GroupBox("Contact Information") {
-            if let email = member.email {
-                LabeledContent("Email") {
-                    Text(email).foregroundStyle(.secondary)
-                }
-            }
-            if let phone = member.phoneNumber {
-                LabeledContent("Phone") {
-                    HStack(spacing: 8) {
-                        Text(phone).foregroundStyle(.secondary)
-                        if PhoneNumberValidator.validate(phone) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            LabeledContent("SMS Notifications") {
-                let enabled = member.smsOptIn && member.phoneNumber != nil
-                    && PhoneNumberValidator.validate(member.phoneNumber!)
-                Text(enabled ? "Enabled" : "Disabled")
-                    .foregroundStyle(enabled ? .green : .secondary)
-            }
-
-            if let lastSent = member.lastStatementSentDate {
-                LabeledContent("Last Statement Sent") {
-                    Text(DateHelper.formatDate(lastSent))
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
     }
 }
@@ -1023,11 +950,7 @@ struct EditMemberSheet: View {
 
     @State private var name: String = ""
     @State private var role: MemberRole = .partTime
-    @State private var email: String = ""
-    @State private var phone: String = ""
     @State private var joinDate = Date()
-    @State private var smsOptIn: Bool = false
-    @State private var showingPhoneError = false
 
     // Custom override fields
     @State private var hasCustomLoanLimit: Bool = false
@@ -1097,47 +1020,6 @@ struct EditMemberSheet: View {
                     Picker("Role", selection: $role) {
                         ForEach(MemberRole.allCases, id: \.self) { role in
                             Text(role.displayName).tag(role)
-                        }
-                    }
-                }
-                
-                Section("Contact Information") {
-                    TextField("Email", text: $email)
-                        .textContentType(.emailAddress)
-                        #if os(iOS)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        #endif
-                    
-                    HStack {
-                        TextField("Phone Number", text: $phone)
-                            .textContentType(.telephoneNumber)
-                            #if os(iOS)
-                            .keyboardType(.phonePad)
-                            #endif
-                        
-                        if !phone.isEmpty {
-                            Image(systemName: PhoneNumberValidator.validate(phone) ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundColor(PhoneNumberValidator.validate(phone) ? .green : .red)
-                        }
-                    }
-                    
-                    if !phone.isEmpty && !PhoneNumberValidator.validate(phone) {
-                        Text("Please enter a valid Kenyan phone number")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                    
-                    Toggle("SMS Notifications", isOn: $smsOptIn)
-                        .disabled(phone.isEmpty || !PhoneNumberValidator.validate(phone))
-                    
-                    if smsOptIn && PhoneNumberValidator.validate(phone) {
-                        HStack {
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.blue)
-                            Text("Member will receive monthly statements via SMS")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -1244,9 +1126,6 @@ struct EditMemberSheet: View {
                     Button("Save") {
                         member.name = name
                         member.memberRole = role
-                        member.email = email.isEmpty ? nil : email
-                        member.phoneNumber = phone.isEmpty ? nil : phone
-                        member.smsOptIn = smsOptIn && PhoneNumberValidator.validate(phone)
                         member.joinDate = joinDate
 
                         // Save override settings
@@ -1282,9 +1161,6 @@ struct EditMemberSheet: View {
         .onAppear {
             name = member.name ?? ""
             role = member.memberRole
-            email = member.email ?? ""
-            phone = member.phoneNumber ?? ""
-            smsOptIn = member.smsOptIn
             joinDate = member.joinDate ?? Date()
 
             // Load override settings
@@ -1306,9 +1182,6 @@ struct EditMemberSheet: View {
     private var hasUnsavedChanges: Bool {
         name != (member.name ?? "") ||
         role != member.memberRole ||
-        email != (member.email ?? "") ||
-        phone != (member.phoneNumber ?? "") ||
-        smsOptIn != member.smsOptIn ||
         joinDate != (member.joinDate ?? Date()) ||
         hasCustomLoanLimit != (member.customLoanLimit > 0) ||
         hasCustomRepaymentTerms != (member.customRepaymentMonths != nil && !(member.customRepaymentMonths ?? "").isEmpty) ||

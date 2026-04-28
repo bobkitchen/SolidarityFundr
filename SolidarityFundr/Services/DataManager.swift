@@ -98,19 +98,16 @@ class DataManager: ObservableObject {
     }
     
     @discardableResult
-    func createMember(name: String, role: MemberRole, email: String? = nil, phoneNumber: String? = nil, joinDate: Date = Date(), smsOptIn: Bool = false) -> Member {
+    func createMember(name: String, role: MemberRole, joinDate: Date = Date()) -> Member {
         let member = Member(context: context)
         member.memberID = UUID()
         member.name = name
         member.memberRole = role
-        member.email = email
-        member.phoneNumber = phoneNumber
         member.joinDate = joinDate
         member.createdAt = Date()
         member.updatedAt = Date()
         member.memberStatus = .active
         member.totalContributions = 0
-        member.smsOptIn = smsOptIn && phoneNumber != nil && PhoneNumberValidator.validate(phoneNumber ?? "")
 
         saveContext()
         fetchMembers()

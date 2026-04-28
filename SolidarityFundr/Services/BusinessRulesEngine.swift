@@ -14,31 +14,16 @@ class BusinessRulesEngine {
     
     // MARK: - Member Validation
     
-    func validateNewMember(name: String, role: MemberRole, email: String?, phoneNumber: String?) -> ValidationResult {
+    func validateNewMember(name: String, role: MemberRole) -> ValidationResult {
         var errors: [String] = []
-        var warnings: [String] = []
-        
-        // Name validation
+        let warnings: [String] = []
+
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append("Member name is required")
         } else if name.count < 2 {
             errors.append("Member name must be at least 2 characters")
         }
-        
-        // Email validation (optional but must be valid if provided)
-        if let email = email, !email.isEmpty {
-            if !isValidEmail(email) {
-                errors.append("Invalid email format")
-            }
-        }
-        
-        // Phone validation (optional but must be valid if provided)
-        if let phone = phoneNumber, !phone.isEmpty {
-            if !isValidPhoneNumber(phone) {
-                warnings.append("Phone number format may be invalid")
-            }
-        }
-        
+
         return ValidationResult(isValid: errors.isEmpty, errors: errors, warnings: warnings)
     }
     

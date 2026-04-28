@@ -193,17 +193,6 @@ extension Member {
             .first
     }
     
-    var canReceiveSMS: Bool {
-        return memberStatus == .active && 
-               phoneNumber != nil && 
-               !phoneNumber!.isEmpty &&
-               smsOptIn
-    }
-    
-    var formattedPhoneNumber: String? {
-        guard let phone = phoneNumber else { return nil }
-        return PhoneNumberValidator.formatToInternational(phone)
-    }
 }
 
 enum MemberRole: String, CaseIterable {

@@ -27,10 +27,7 @@ class MemberViewModel: ObservableObject {
     // New member form fields
     @Published var newMemberName = ""
     @Published var newMemberRole = MemberRole.partTime
-    @Published var newMemberEmail = ""
-    @Published var newMemberPhone = ""
     @Published var newMemberJoinDate = Date()
-    @Published var newMemberSMSOptIn = false
     
     private let dataManager = DataManager.shared
     private let businessRules = BusinessRulesEngine.shared
@@ -40,12 +37,11 @@ class MemberViewModel: ObservableObject {
     var filteredMembers: [Member] {
         var filtered = members
         
-        // Search filter
+        // Search filter — name only. Contact details no longer surface in
+        // the app, so they're not searchable either.
         if !searchText.isEmpty {
             filtered = filtered.filter { member in
-                member.name?.localizedCaseInsensitiveContains(searchText) ?? false ||
-                member.email?.localizedCaseInsensitiveContains(searchText) ?? false ||
-                member.phoneNumber?.localizedCaseInsensitiveContains(searchText) ?? false
+                member.name?.localizedCaseInsensitiveContains(searchText) ?? false
             }
         }
         
@@ -98,27 +94,21 @@ class MemberViewModel: ObservableObject {
         // Validate input
         let validation = businessRules.validateNewMember(
             name: newMemberName,
-            role: newMemberRole,
-            email: newMemberEmail.isEmpty ? nil : newMemberEmail,
-            phoneNumber: newMemberPhone.isEmpty ? nil : newMemberPhone
+            role: newMemberRole
         )
-        
+
         if !validation.isValid {
             errorMessage = validation.errorMessage
             showingError = true
             return
         }
-        
+
         validationWarnings = validation.warnings
-        
-        // Create member
+
         dataManager.createMember(
             name: newMemberName,
             role: newMemberRole,
-            email: newMemberEmail.isEmpty ? nil : newMemberEmail,
-            phoneNumber: newMemberPhone.isEmpty ? nil : newMemberPhone,
-            joinDate: newMemberJoinDate,
-            smsOptIn: newMemberSMSOptIn
+            joinDate: newMemberJoinDate
         )
         
         // Reset form
@@ -134,9 +124,7 @@ class MemberViewModel: ObservableObject {
         // Validate updates
         let validation = businessRules.validateNewMember(
             name: member.name ?? "",
-            role: member.memberRole,
-            email: member.email,
-            phoneNumber: member.phoneNumber
+            role: member.memberRole
         )
         
         if !validation.isValid {
@@ -232,10 +220,7 @@ class MemberViewModel: ObservableObject {
     func clearNewMemberForm() {
         newMemberName = ""
         newMemberRole = .partTime
-        newMemberEmail = ""
-        newMemberPhone = ""
         newMemberJoinDate = Date()
-        newMemberSMSOptIn = false
         validationWarnings = []
     }
     

@@ -611,52 +611,39 @@ struct MemberSelector: View {
     
     enum MemberFilterOption: String, CaseIterable {
         case all = "All Members"
-        case withPhone = "Has Phone Number"
-        case neverSent = "Never Sent"
-        case overdue = "Overdue"
+        case withActiveLoan = "With Active Loan"
+        case withoutActiveLoan = "Without Active Loan"
 
         var icon: String {
             switch self {
             case .all: return "person.3"
-            case .withPhone: return "phone.fill"
-            case .neverSent: return "paperplane"
-            case .overdue: return "clock.badge.exclamationmark"
+            case .withActiveLoan: return "creditcard.fill"
+            case .withoutActiveLoan: return "creditcard"
             }
         }
     }
-    
+
     enum MemberSortOption: String, CaseIterable {
         case name = "Name"
-        case lastStatement = "Last Statement"
         case role = "Role"
     }
-    
+
     var filteredMembers: [Member] {
         let members = dataManager.members.filter { member in
             switch filterOption {
             case .all:
                 return true
-            case .withPhone:
-                return member.phoneNumber != nil
-            case .neverSent:
-                return member.lastStatementSentDate == nil
-            case .overdue:
-                // Consider overdue if no statement sent in last 30 days
-                if let lastSent = member.lastStatementSentDate {
-                    return Date().timeIntervalSince(lastSent) > 30 * 24 * 60 * 60
-                }
-                return true
+            case .withActiveLoan:
+                return member.hasActiveLoans
+            case .withoutActiveLoan:
+                return !member.hasActiveLoans
             }
         }
-        
+
         return members.sorted { m1, m2 in
             switch sortOption {
             case .name:
                 return (m1.name ?? "") < (m2.name ?? "")
-            case .lastStatement:
-                let date1 = m1.lastStatementSentDate ?? Date.distantPast
-                let date2 = m2.lastStatementSentDate ?? Date.distantPast
-                return date1 > date2
             case .role:
                 return m1.memberRole.rawValue < m2.memberRole.rawValue
             }
@@ -746,32 +733,12 @@ struct MemberSelector: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(member.name ?? "Unknown")
-                                            .fontWeight(.medium)
+                                    Text(member.name ?? "Unknown")
+                                        .fontWeight(.medium)
 
-                                        if member.phoneNumber != nil {
-                                            Image(systemName: "phone.fill")
-                                                .font(.caption)
-                                                .foregroundStyle(.green)
-                                        }
-                                    }
-                                    
-                                    HStack {
-                                        Text(member.memberRole.displayName)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        
-                                        if let lastSent = member.lastStatementSentDate {
-                                            Text("• Last sent: \(DateHelper.formatShortDate(lastSent))")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        } else {
-                                            Text("• Never sent")
-                                                .font(.caption)
-                                                .foregroundStyle(.orange)
-                                        }
-                                    }
+                                    Text(member.memberRole.displayName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                                 
                                 Spacer()
@@ -1282,15 +1249,10 @@ struct MemberInfoCard: View {
             }
             
             Divider()
-            
+
             HStack {
                 InfoItem(label: "Member Since", value: DateHelper.formatDate(member.joinDate))
                 Spacer()
-                InfoItem(label: "Phone", value: member.phoneNumber ?? "N/A")
-            }
-            
-            if let email = member.email {
-                InfoItem(label: "Email", value: email)
             }
         }
         .padding()

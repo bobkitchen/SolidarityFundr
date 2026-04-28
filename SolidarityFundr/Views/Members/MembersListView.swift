@@ -361,9 +361,9 @@ struct AddMemberSheet: View {
     @FocusState private var focusedField: Field?
     
     enum Field {
-        case name, email, phone
+        case name
     }
-    
+
     var body: some View {
         NavigationStack {
             Form {
@@ -371,57 +371,14 @@ struct AddMemberSheet: View {
                     TextField("Full Name", text: $viewModel.newMemberName)
                         .focused($focusedField, equals: .name)
                         .textContentType(.name)
-                    
+
                     Picker("Role", selection: $viewModel.newMemberRole) {
                         ForEach(MemberRole.allCases, id: \.self) { role in
                             Text(role.displayName).tag(role)
                         }
                     }
                 }
-                
-                Section("Contact Information") {
-                    TextField("Email (Optional)", text: $viewModel.newMemberEmail)
-                        .focused($focusedField, equals: .email)
-                        .textContentType(.emailAddress)
-                        #if os(iOS)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        #endif
-                    
-                    HStack {
-                        TextField("Phone Number (Optional)", text: $viewModel.newMemberPhone)
-                            .focused($focusedField, equals: .phone)
-                            .textContentType(.telephoneNumber)
-                            #if os(iOS)
-                            .keyboardType(.phonePad)
-                            #endif
-                        
-                        if !viewModel.newMemberPhone.isEmpty {
-                            Image(systemName: PhoneNumberValidator.validate(viewModel.newMemberPhone) ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundColor(PhoneNumberValidator.validate(viewModel.newMemberPhone) ? .green : .red)
-                        }
-                    }
-                    
-                    if !viewModel.newMemberPhone.isEmpty && !PhoneNumberValidator.validate(viewModel.newMemberPhone) {
-                        Text("Please enter a valid Kenyan phone number")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                    
-                    Toggle("SMS Notifications", isOn: $viewModel.newMemberSMSOptIn)
-                        .disabled(viewModel.newMemberPhone.isEmpty || !PhoneNumberValidator.validate(viewModel.newMemberPhone))
-                    
-                    if viewModel.newMemberSMSOptIn && PhoneNumberValidator.validate(viewModel.newMemberPhone) {
-                        HStack {
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.blue)
-                            Text("Member will receive monthly statements via SMS")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                
+
                 Section("Employment Details") {
                     DatePicker("Start Date", selection: $viewModel.newMemberJoinDate, displayedComponents: .date)
                         .datePickerStyle(.compact)
