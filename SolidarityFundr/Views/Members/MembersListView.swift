@@ -92,16 +92,24 @@ struct MembersListView: View {
     @ViewBuilder
     private func memberRowEntry(for member: Member) -> some View {
         #if os(macOS)
-        MemberRowView(member: member) {
+        // macOS: row tap opens a separate detail window. Wrap the
+        // pure-content row in a Button so the entire row reads as the
+        // hit target.
+        Button {
             openMemberDetail(member)
+        } label: {
+            MemberRowView(member: member)
         }
+        .buttonStyle(.plain)
         #else
+        // iOS: NavigationLink pushes the detail page inside the
+        // existing NavigationStack. The link's automatic chevron is
+        // the only one rendered (the row no longer draws its own).
         NavigationLink {
             MemberDetailView(member: member)
         } label: {
-            MemberRowView(member: member) {}
+            MemberRowView(member: member)
         }
-        .buttonStyle(.plain)
         #endif
     }
     
@@ -291,35 +299,43 @@ struct MembersListView: View {
 
 // MARK: - Member Row View
 
+/// Pure row content for the members list. No Button, no NavigationLink,
+/// no chevron — the call site decides how the row should be triggered:
+///
+///   - macOS: wrapped in a Button that opens a member detail window.
+///   - iOS:   wrapped in a NavigationLink that pushes member detail.
+///
+/// Wrapping a Button inside a NavigationLink (the previous pattern) made
+/// the whole row swallow taps into a no-op closure and forced the user to
+/// hit NavigationLink's auto-chevron — and printed two chevrons because
+/// the row was also drawing its own.
 struct MemberRowView: View {
     let member: Member
-    let onTap: () -> Void
-    
+
     var body: some View {
-        Button(action: onTap) {
             HStack {
                 // Shared avatar primitive — uses the member's uploaded
                 // photo when present, otherwise the deterministic
                 // colour-disc fallback.
                 MemberAvatar(member: member, size: 36)
-                
+
                 // Member Info
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(member.name ?? "Unknown")
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        
+
                         if member.memberStatus != .active {
                             StatusBadge(status: member.memberStatus)
                         }
                     }
-                    
+
                     HStack {
                         Label(member.memberRole.displayName, systemImage: "briefcase.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        
+
                         if member.hasActiveLoans {
                             Spacer()
                             Label("Active Loan", systemImage: "creditcard.fill")
@@ -328,9 +344,9 @@ struct MemberRowView: View {
                         }
                     }
                 }
-                
+
                 Spacer()
-                
+
                 // Contribution Info
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(CurrencyFormatter.shared.format(member.totalContributions))
@@ -341,14 +357,9 @@ struct MemberRowView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
+            .contentShape(Rectangle()) // tap target = full row
             .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
     }
 }
 
