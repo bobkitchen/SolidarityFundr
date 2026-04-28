@@ -33,7 +33,6 @@ struct MemberDetailView: View {
                     ContributionChartCard(contributions: contributions)
                 }
                 eligibilityElevated
-                contactInline
                 loanHistorySection
                 paymentHistorySection
             }
@@ -148,14 +147,9 @@ struct MemberDetailView: View {
     /// of empty space above and below a tiny avatar.
     private var identityHeader: some View {
         HStack(alignment: .center, spacing: 16) {
-            Image(systemName: "person.crop.circle.fill")
-                .resizable()
-                .frame(width: 56, height: 56)
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, BrandColor.avatarTint(for: member.name))
-                .accessibilityHidden(true)
+            avatarDisc
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(member.name ?? "Unknown")
                     .font(.title.weight(.semibold))
 
@@ -166,6 +160,11 @@ struct MemberDetailView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+                // Compact contact line under the identity. Reference info
+                // sits where the eye already is, instead of floating in
+                // its own section between Eligibility and Loans.
+                contactLine
             }
 
             Spacer()
@@ -185,6 +184,57 @@ struct MemberDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    /// Solid coloured disc with a white person silhouette overlaid. The
+    /// previous `.palette` symbol rendering on `person.crop.circle.fill`
+    /// quietly fell back to the system default — the per-member tint
+    /// never came through. This composition is explicit.
+    private var avatarDisc: some View {
+        ZStack {
+            Circle()
+                .fill(BrandColor.avatarTint(for: member.name))
+            Image(systemName: "person.fill")
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 56, height: 56)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var contactLine: some View {
+        let parts: [(String, String)] = {
+            var result: [(String, String)] = []
+            if let phone = member.phoneNumber, !phone.isEmpty {
+                result.append(("phone", phone))
+            }
+            if let email = member.email, !email.isEmpty {
+                result.append(("envelope", email))
+            }
+            if let lastSent = member.lastStatementSentDate {
+                result.append(("doc.text", "Statement sent \(DateHelper.formatShortDate(lastSent))"))
+            }
+            return result
+        }()
+
+        if !parts.isEmpty {
+            HStack(spacing: 14) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                    Label(part.1, systemImage: part.0)
+                        .labelStyle(.titleAndIcon)
+                }
+                if member.smsOptIn,
+                   let phone = member.phoneNumber,
+                   PhoneNumberValidator.validate(phone) {
+                    Label("SMS", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.green)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -240,42 +290,6 @@ struct MemberDetailView: View {
             newLoanPrefillAmount = amount
             newLoanPrefillMonths = months
             showingNewLoan = true
-        }
-    }
-
-    /// Single inline row of contact details. Doesn't earn a card — three
-    /// reference fields can sit horizontally in the spacing budget that
-    /// a full GroupBox would consume vertically.
-    @ViewBuilder
-    private var contactInline: some View {
-        if member.email != nil || member.phoneNumber != nil || member.lastStatementSentDate != nil {
-            HStack(spacing: 18) {
-                if let phone = member.phoneNumber {
-                    Label(phone, systemImage: "phone")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.secondary)
-                }
-                if let email = member.email {
-                    Label(email, systemImage: "envelope")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.secondary)
-                }
-                if let lastSent = member.lastStatementSentDate {
-                    Label("Statement sent \(DateHelper.formatShortDate(lastSent))",
-                          systemImage: "doc.text")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.secondary)
-                }
-                if member.smsOptIn,
-                   let phone = member.phoneNumber,
-                   PhoneNumberValidator.validate(phone) {
-                    Label("SMS enabled", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.green)
-                }
-                Spacer()
-            }
-            .font(.callout)
         }
     }
 
@@ -741,7 +755,7 @@ struct ContributionHistoryList: View {
 
 struct LoanCard: View {
     let loan: Loan
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -752,16 +766,16 @@ struct LoanCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                
+
                 Spacer()
-                
-                StatusBadge(status: loan.loanStatus == .active ? .active : .inactive)
+
+                LoanStatusPill(loan: loan)
             }
-            
+
             if loan.loanStatus == .active {
                 ProgressView(value: loan.completionPercentage, total: 100)
                     .tint(.accentColor)
-                
+
                 HStack {
                     Text("Remaining: \(CurrencyFormatter.shared.format(loan.balance))")
                         .font(.caption)
@@ -770,24 +784,56 @@ struct LoanCard: View {
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
-                
+
                 if loan.isOverdue {
                     Label("Payment overdue", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
-            } else {
+            } else if loan.loanStatus == .completed {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     Text("Completed on \(DateHelper.formatDate(loan.completedDate))")
                         .font(.caption)
                 }
+                .foregroundStyle(.secondary)
             }
         }
         .padding()
         .background(.quaternary)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// Loan-specific status pill. Replaces the previous `StatusBadge`
+/// abuse, which was the member-status primitive and only had Active /
+/// Inactive — leaving completed loans labelled "Inactive" in grey.
+struct LoanStatusPill: View {
+    let loan: Loan
+
+    var body: some View {
+        Text(label)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.18))
+            .foregroundStyle(tint)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private var label: String {
+        if loan.loanStatus == .completed { return "Completed" }
+        if loan.isOverdue { return "Overdue" }
+        if loan.loanStatus == .active { return "Active" }
+        return loan.loanStatus.rawValue.capitalized
+    }
+
+    private var tint: Color {
+        if loan.loanStatus == .completed { return .green }
+        if loan.isOverdue { return .red }
+        if loan.loanStatus == .active { return .blue }
+        return .gray
     }
 }
 
