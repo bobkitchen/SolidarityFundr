@@ -48,6 +48,7 @@
         <attribute name="overrideApprovedDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="overrideReason" optional="YES" attributeType="String"/>
         <attribute name="phoneNumber" optional="YES" attributeType="String"/>
+        <attribute name="photoData" optional="YES" attributeType="Binary" allowsExternalBinaryDataStorage="YES"/>
         <attribute name="role" optional="YES" attributeType="String"/>
         <attribute name="smsOptIn" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="status" optional="YES" attributeType="String" defaultValueString="active"/>

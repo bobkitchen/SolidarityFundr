@@ -281,15 +281,10 @@ struct MemberRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                // Member Avatar — SF Symbol tinted deterministically from the
-                // member's name. Each member gets a stable color across sessions
-                // without requiring uploaded photos.
-                Image(systemName: "person.crop.circle.fill")
-                    .resizable()
-                    .frame(width: 36, height: 36)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(BrandColor.avatarTint(for: member.name))
-                    .accessibilityHidden(true)
+                // Shared avatar primitive — uses the member's uploaded
+                // photo when present, otherwise the deterministic
+                // colour-disc fallback.
+                MemberAvatar(member: member, size: 36)
                 
                 // Member Info
                 VStack(alignment: .leading, spacing: 4) {

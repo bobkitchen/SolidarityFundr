@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Charts
+import PhotosUI
 
 struct MemberDetailView: View {
     @ObservedObject var member: Member
@@ -22,6 +23,13 @@ struct MemberDetailView: View {
     /// card's "Issue Loan with these terms" button.
     @State private var newLoanPrefillAmount: Double?
     @State private var newLoanPrefillMonths: Int?
+
+    /// PhotosPicker selection — drives the upload pipeline below the
+    /// avatar. Keeping this on MemberDetailView (rather than inside the
+    /// avatar component) so the same component can be re-used in
+    /// read-only contexts without dragging Photos in.
+    @State private var photoPickerItem: PhotosPickerItem?
+    @State private var isProcessingPhoto = false
 
     var body: some View {
         ScrollView {
@@ -147,7 +155,7 @@ struct MemberDetailView: View {
     /// of empty space above and below a tiny avatar.
     private var identityHeader: some View {
         HStack(alignment: .center, spacing: 16) {
-            avatarDisc
+            avatarPicker
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(member.name ?? "Unknown")
@@ -187,20 +195,62 @@ struct MemberDetailView: View {
         }
     }
 
-    /// Solid coloured disc with a white person silhouette overlaid. The
-    /// previous `.palette` symbol rendering on `person.crop.circle.fill`
-    /// quietly fell back to the system default — the per-member tint
-    /// never came through. This composition is explicit.
-    private var avatarDisc: some View {
-        ZStack {
-            Circle()
-                .fill(BrandColor.avatarTint(for: member.name))
-            Image(systemName: "person.fill")
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(.white)
+    /// Tap-to-upload avatar. Wraps the shared `MemberAvatar` in a
+    /// `PhotosPicker` so the admin can choose a photo from their library
+    /// directly from the member page. A small camera-overlay hint sits
+    /// in the bottom-right so the affordance is discoverable without
+    /// being loud.
+    private var avatarPicker: some View {
+        PhotosPicker(selection: $photoPickerItem, matching: .images, photoLibrary: .shared()) {
+            ZStack(alignment: .bottomTrailing) {
+                MemberAvatar(member: member, size: 64)
+
+                // Camera overlay — half-baked-in, half-floating.
+                Image(systemName: "camera.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .padding(5)
+                    .background(BrandColor.avocado, in: Circle())
+                    .overlay(Circle().stroke(.background, lineWidth: 2))
+                    .opacity(isProcessingPhoto ? 0.4 : 1)
+                    .offset(x: 2, y: 2)
+
+                if isProcessingPhoto {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(2)
+                }
+            }
         }
-        .frame(width: 56, height: 56)
-        .accessibilityHidden(true)
+        .buttonStyle(.plain)
+        .help("Change photo")
+        .onChange(of: photoPickerItem) { _, newItem in
+            guard let newItem else { return }
+            applyPickedPhoto(newItem)
+        }
+    }
+
+    private func applyPickedPhoto(_ item: PhotosPickerItem) {
+        isProcessingPhoto = true
+        Task {
+            defer {
+                Task { @MainActor in
+                    isProcessingPhoto = false
+                    photoPickerItem = nil
+                }
+            }
+
+            guard let raw = try? await item.loadTransferable(type: Data.self),
+                  let processed = MemberPhotoProcessor.process(raw) else {
+                return
+            }
+
+            await MainActor.run {
+                member.photoData = processed
+                member.updatedAt = Date()
+                try? PersistenceController.shared.container.viewContext.save()
+            }
+        }
     }
 
     @ViewBuilder
@@ -886,13 +936,49 @@ struct EditMemberSheet: View {
     @State private var allowedRepaymentMonths: Set<Int> = []
     @State private var overrideReason: String = ""
     
+    @State private var photoPickerItem: PhotosPickerItem?
+    @State private var isProcessingPhoto = false
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("Photo") {
+                    HStack(spacing: 16) {
+                        MemberAvatar(member: member, size: 64)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            PhotosPicker("Choose Photo…",
+                                         selection: $photoPickerItem,
+                                         matching: .images,
+                                         photoLibrary: .shared())
+                            if member.photoData != nil {
+                                Button(role: .destructive) {
+                                    member.photoData = nil
+                                    member.updatedAt = Date()
+                                    try? PersistenceController.shared.container.viewContext.save()
+                                } label: {
+                                    Text("Remove Photo")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            if isProcessingPhoto {
+                                Label("Processing…", systemImage: "hourglass")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .onChange(of: photoPickerItem) { _, newItem in
+                        guard let newItem else { return }
+                        loadAndApplyPhoto(newItem)
+                    }
+                }
+
                 Section("Member Information") {
                     TextField("Full Name", text: $name)
                         .textContentType(.name)
-                    
+
                     Picker("Role", selection: $role) {
                         ForEach(MemberRole.allCases, id: \.self) { role in
                             Text(role.displayName).tag(role)
@@ -1122,6 +1208,27 @@ struct EditMemberSheet: View {
             return 19000
         case .securityGuard, .partTime:
             return 10000
+        }
+    }
+
+    private func loadAndApplyPhoto(_ item: PhotosPickerItem) {
+        isProcessingPhoto = true
+        Task {
+            defer {
+                Task { @MainActor in
+                    isProcessingPhoto = false
+                    photoPickerItem = nil
+                }
+            }
+            guard let raw = try? await item.loadTransferable(type: Data.self),
+                  let processed = MemberPhotoProcessor.process(raw) else {
+                return
+            }
+            await MainActor.run {
+                member.photoData = processed
+                member.updatedAt = Date()
+                try? PersistenceController.shared.container.viewContext.save()
+            }
         }
     }
 }
