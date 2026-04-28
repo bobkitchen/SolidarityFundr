@@ -269,7 +269,10 @@ private struct MonthlyStatementPreview: View {
         StatementCalculator(asOf: month.endDate)
     }
 
-    private var rows: [MemberRow] {
+    /// Active members ranked by contributions DESC, tiebreak join date ASC.
+    /// Mirrors `PDFGenerator.drawSavingsStandings` so the preview shows
+    /// what the printout will show.
+    private var rankedMembers: [MemberRow] {
         dataManager.members
             .filter { calculator.wasActive($0) }
             .map { member in
@@ -277,11 +280,49 @@ private struct MonthlyStatementPreview: View {
                     name: member.name ?? "Unknown",
                     role: member.memberRole.displayName,
                     contributions: calculator.contributions(for: member),
-                    loanBalance: calculator.outstandingLoanBalance(for: member),
-                    monthlyPayment: calculator.monthlyLoanPaymentDue(for: member)
+                    joinDate: member.joinDate
                 )
             }
-            .sorted { $0.name < $1.name }
+            .sorted { lhs, rhs in
+                if lhs.contributions != rhs.contributions {
+                    return lhs.contributions > rhs.contributions
+                }
+                switch (lhs.joinDate, rhs.joinDate) {
+                case (let l?, let r?): return l < r
+                case (.some, .none): return true
+                case (.none, .some): return false
+                case (.none, .none): return lhs.name < rhs.name
+                }
+            }
+    }
+
+    private var activeLoanRows: [LoanProgressViewModel] {
+        let allLoans = (try? PersistenceController.shared.container.viewContext.fetch(Loan.fetchRequest())) ?? []
+        return allLoans
+            .filter { loan in
+                guard let issued = loan.issueDate, issued <= month.endDate else { return false }
+                if let completed = loan.completedDate, completed <= month.endDate { return false }
+                return calculator.balance(for: loan) > 0.01
+            }
+            .map { loan in
+                let asOfOverdue: Bool = {
+                    guard let due = loan.dueDate else { return false }
+                    return due < month.endDate
+                }()
+                let balance = calculator.balance(for: loan)
+                let percent = loan.amount > 0 ? min(1.0, (loan.amount - balance) / loan.amount) : 0
+                return LoanProgressViewModel(
+                    memberName: loan.member?.name ?? "Unknown",
+                    originalAmount: loan.amount,
+                    balance: balance,
+                    monthlyPayment: loan.monthlyPayment,
+                    nextDue: loan.nextPaymentDue,
+                    percentRepaid: percent,
+                    marker: LoanProgressMarker.evaluate(percentRepaid: percent, isOverdue: asOfOverdue),
+                    isOverdue: asOfOverdue
+                )
+            }
+            .sorted { $0.memberName < $1.memberName }
     }
 
     private var fundBalance: Double { calculator.fundBalance() }
@@ -290,111 +331,104 @@ private struct MonthlyStatementPreview: View {
     private var activeCount: Int { calculator.activeMembersCount() }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 24) {
             Text("Statement for \(month.displayName)")
                 .font(.title2.weight(.semibold))
 
-            // Metrics row
-            HStack(spacing: 12) {
-                metricCard("Fund Balance", value: CurrencyFormatter.shared.format(fundBalance), tint: .green)
-                metricCard("Total Contributions", value: CurrencyFormatter.shared.format(totalContributions), tint: .blue)
-                metricCard("Outstanding Loans", value: CurrencyFormatter.shared.format(totalOutstanding), tint: .orange)
-                metricCard("Active Members", value: "\(activeCount)", tint: .purple)
+            heroBand
+
+            savingsStandings
+
+            if !activeLoanRows.isEmpty {
+                loanProgress
             }
-
-            // Member table
-            VStack(alignment: .leading, spacing: 0) {
-                tableHeader
-
-                ForEach(rows) { row in
-                    HStack(spacing: 0) {
-                        Text(row.name)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(row.role)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 140, alignment: .leading)
-                        Text(CurrencyFormatter.shared.format(row.contributions))
-                            .frame(width: 140, alignment: .trailing)
-                            .monospacedDigit()
-                        Text(row.loanBalance > 0 ? CurrencyFormatter.shared.format(row.loanBalance) : "—")
-                            .foregroundStyle(row.loanBalance > 0 ? .primary : .secondary)
-                            .frame(width: 140, alignment: .trailing)
-                            .monospacedDigit()
-                        Text(row.monthlyPayment > 0 ? CurrencyFormatter.shared.format(row.monthlyPayment) : "—")
-                            .foregroundStyle(row.monthlyPayment > 0 ? .primary : .secondary)
-                            .frame(width: 140, alignment: .trailing)
-                            .monospacedDigit()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .font(.callout)
-                    .background(Color.secondary.opacity(0.04))
-                    .overlay(Divider(), alignment: .bottom)
-                }
-
-                // Totals row
-                HStack(spacing: 0) {
-                    Text("Total")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("")
-                        .frame(width: 140)
-                    Text(CurrencyFormatter.shared.format(rows.map(\.contributions).reduce(0, +)))
-                        .fontWeight(.semibold)
-                        .frame(width: 140, alignment: .trailing)
-                        .monospacedDigit()
-                    Text(CurrencyFormatter.shared.format(rows.map(\.loanBalance).reduce(0, +)))
-                        .fontWeight(.semibold)
-                        .frame(width: 140, alignment: .trailing)
-                        .monospacedDigit()
-                    Text(CurrencyFormatter.shared.format(rows.map(\.monthlyPayment).reduce(0, +)))
-                        .fontWeight(.semibold)
-                        .frame(width: 140, alignment: .trailing)
-                        .monospacedDigit()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .font(.callout)
-                .background(Color.accentColor.opacity(0.06))
-            }
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
 
             generateButton
         }
     }
 
-    private var tableHeader: some View {
-        HStack(spacing: 0) {
-            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Role").frame(width: 140, alignment: .leading)
-            Text("Contributions").frame(width: 140, alignment: .trailing)
-            Text("Loan Balance").frame(width: 140, alignment: .trailing)
-            Text("Monthly Due").frame(width: 140, alignment: .trailing)
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.secondary.opacity(0.10))
-    }
+    // MARK: Hero band
 
-    private func metricCard(_ title: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption)
+    private var heroBand: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("FUND BALANCE")
+                .font(.caption2.weight(.semibold))
+                .tracking(1.5)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(.title3.weight(.semibold))
+            Text(CurrencyFormatter.shared.format(fundBalance))
+                .font(.system(size: 44, weight: .semibold))
                 .monospacedDigit()
-            Capsule()
-                .fill(tint)
-                .frame(height: 3)
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(CurrencyFormatter.shared.format(totalContributions)) contributed   ·   \(CurrencyFormatter.shared.format(totalOutstanding)) in active loans")
+                Text("\(activeCount) active \(activeCount == 1 ? "member" : "members")   ·   \(activeLoanRows.count) \(activeLoanRows.count == 1 ? "loan" : "loans") being repaid")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(20)
         .background(.quaternary)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: Savings standings
+
+    private var savingsStandings: some View {
+        let topThree = Array(rankedMembers.prefix(3))
+        let rest = Array(rankedMembers.dropFirst(3))
+
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("🏆  Savings Standings")
+                .font(.headline)
+
+            if !topThree.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(Array(topThree.enumerated()), id: \.offset) { idx, row in
+                        PodiumCard(rank: idx, row: row)
+                    }
+                }
+            }
+
+            if !rest.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(rest.enumerated()), id: \.offset) { _, row in
+                        HStack {
+                            Text(row.name)
+                                .fontWeight(.medium)
+                            Text("·")
+                                .foregroundStyle(.secondary)
+                            Text(row.role)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(CurrencyFormatter.shared.format(row.contributions))
+                                .monospacedDigit()
+                        }
+                        .padding(.vertical, 9)
+                        .padding(.horizontal, 12)
+                        .font(.callout)
+                        .overlay(Divider(), alignment: .bottom)
+                    }
+                }
+                .background(.quaternary)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+    }
+
+    // MARK: Loan progress
+
+    private var loanProgress: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("💪  Loan Repayment Progress")
+                .font(.headline)
+
+            VStack(spacing: 14) {
+                ForEach(Array(activeLoanRows.enumerated()), id: \.offset) { _, row in
+                    LoanProgressCard(row: row)
+                }
+            }
+        }
     }
 
     private var generateButton: some View {
@@ -418,13 +452,108 @@ private struct MonthlyStatementPreview: View {
         .disabled(isGenerating)
     }
 
-    private struct MemberRow: Identifiable {
-        let id = UUID()
+    // MARK: View models (preview-local)
+
+    fileprivate struct MemberRow {
         let name: String
         let role: String
         let contributions: Double
-        let loanBalance: Double
+        let joinDate: Date?
+    }
+
+    fileprivate struct LoanProgressViewModel {
+        let memberName: String
+        let originalAmount: Double
+        let balance: Double
         let monthlyPayment: Double
+        let nextDue: Date?
+        let percentRepaid: Double
+        let marker: LoanProgressMarker
+        let isOverdue: Bool
+    }
+}
+
+// MARK: - Podium card
+
+private struct PodiumCard: View {
+    let rank: Int  // 0, 1, 2
+    let row: MonthlyStatementPreview.MemberRow
+
+    private var medal: String { ["🥇", "🥈", "🥉"][min(rank, 2)] }
+
+    private var bgTint: Color {
+        switch rank {
+        case 0: return Color.yellow.opacity(0.18)
+        case 1: return Color.gray.opacity(0.15)
+        case 2: return Color.orange.opacity(0.18)
+        default: return Color.gray.opacity(0.08)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(rank == 0 ? "👑  🥇" : medal)
+                .font(.system(size: 24))
+            Text(row.name)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+            Text(row.role)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(CurrencyFormatter.shared.format(row.contributions))
+                .font(.headline)
+                .monospacedDigit()
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 8)
+        .background(bgTint)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Loan progress card
+
+private struct LoanProgressCard: View {
+    let row: MonthlyStatementPreview.LoanProgressViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(row.memberName)
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                HStack(spacing: 6) {
+                    Text("\(Int((row.percentRepaid * 100).rounded())) % repaid")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(row.isOverdue ? Color.red : .secondary)
+                    if !row.marker.emoji.isEmpty {
+                        Text(row.marker.emoji)
+                    }
+                }
+            }
+            ProgressView(value: row.percentRepaid)
+                .progressViewStyle(.linear)
+                .tint(row.isOverdue ? .red : .green)
+            HStack {
+                Text("\(CurrencyFormatter.shared.format(row.balance)) of \(CurrencyFormatter.shared.format(row.originalAmount)) remaining")
+                Spacer()
+                if let due = row.nextDue, row.balance > 0.01 {
+                    Text("Next: \(CurrencyFormatter.shared.format(row.monthlyPayment)) due \(due.formatted(date: .abbreviated, time: .omitted))")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

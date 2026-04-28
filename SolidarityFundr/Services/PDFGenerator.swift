@@ -32,6 +32,7 @@ struct MonthlyStatementSnapshot {
     let totalContributions: Double
     let totalOutstandingLoans: Double
     let activeMembersCount: Int
+    let activeLoansCount: Int
     let memberRows: [MemberRow]
     let activeLoans: [LoanRow]
 
@@ -39,8 +40,7 @@ struct MonthlyStatementSnapshot {
         let name: String
         let role: String
         let contributions: Double
-        let loanBalance: Double
-        let monthlyPayment: Double
+        let joinDate: Date?  // tiebreak for ranking
     }
 
     struct LoanRow {
@@ -50,6 +50,47 @@ struct MonthlyStatementSnapshot {
         let monthlyPayment: Double
         let issueDate: Date?
         let dueDate: Date?
+        let nextPaymentDue: Date?
+        let isOverdue: Bool
+
+        var amountRepaid: Double { max(0, originalAmount - balance) }
+        var percentRepaid: Double {
+            guard originalAmount > 0 else { return 0 }
+            return min(1.0, amountRepaid / originalAmount)
+        }
+        var marker: LoanProgressMarker {
+            LoanProgressMarker.evaluate(percentRepaid: percentRepaid, isOverdue: isOverdue)
+        }
+    }
+}
+
+/// Progress emoji applied to a loan card. The order is exclusive:
+/// overdue dominates everything; otherwise the highest-progress
+/// threshold wins. Below 50% no marker is shown — silence beats
+/// fake cheer.
+enum LoanProgressMarker {
+    case overdue       // ⚠️
+    case finalStretch  // ✅ (≥ 90%)
+    case onFire        // 🔥 (≥ 75%)
+    case halfway       // 🎯 (≥ 50%)
+    case none
+
+    var emoji: String {
+        switch self {
+        case .overdue:      return "⚠️"
+        case .finalStretch: return "✅"
+        case .onFire:       return "🔥"
+        case .halfway:      return "🎯"
+        case .none:         return ""
+        }
+    }
+
+    static func evaluate(percentRepaid: Double, isOverdue: Bool) -> LoanProgressMarker {
+        if isOverdue { return .overdue }
+        if percentRepaid >= 0.90 { return .finalStretch }
+        if percentRepaid >= 0.75 { return .onFire }
+        if percentRepaid >= 0.50 { return .halfway }
+        return .none
     }
 }
 
@@ -128,19 +169,21 @@ final class PDFGenerator {
 
         let activeMembers = dataManager.members.filter { calc.wasActive($0) }
 
-        let memberRows = activeMembers
-            .map { member in
-                MonthlyStatementSnapshot.MemberRow(
-                    name: member.name ?? "Unknown",
-                    role: member.memberRole.displayName,
-                    contributions: calc.contributions(for: member),
-                    loanBalance: calc.outstandingLoanBalance(for: member),
-                    monthlyPayment: calc.monthlyLoanPaymentDue(for: member)
-                )
-            }
-            .sorted { $0.name < $1.name }
+        // Member rows: keep all active members; ranking is applied at
+        // render time so the snapshot stays a pure data capture.
+        let memberRows = activeMembers.map { member in
+            MonthlyStatementSnapshot.MemberRow(
+                name: member.name ?? "Unknown",
+                role: member.memberRole.displayName,
+                contributions: calc.contributions(for: member),
+                joinDate: member.joinDate
+            )
+        }
 
         // Active-as-of-end-of-month loans (issued by then, not yet completed).
+        // Overdue is computed against the statement's asOf date — not "now"
+        // — so a statement issued for March doesn't retroactively flag a
+        // loan that only fell behind in April.
         let allLoans = (try? PersistenceController.shared.container.viewContext.fetch(Loan.fetchRequest())) ?? []
         let activeLoans = allLoans
             .filter { loan in
@@ -149,13 +192,19 @@ final class PDFGenerator {
                 return calc.balance(for: loan) > 0.01
             }
             .map { loan in
-                MonthlyStatementSnapshot.LoanRow(
+                let asOfOverdue: Bool = {
+                    guard let due = loan.dueDate else { return false }
+                    return due < month.endDate
+                }()
+                return MonthlyStatementSnapshot.LoanRow(
                     memberName: loan.member?.name ?? "Unknown",
                     originalAmount: loan.amount,
                     balance: calc.balance(for: loan),
                     monthlyPayment: loan.monthlyPayment,
                     issueDate: loan.issueDate,
-                    dueDate: loan.dueDate
+                    dueDate: loan.dueDate,
+                    nextPaymentDue: loan.nextPaymentDue,
+                    isOverdue: asOfOverdue
                 )
             }
             .sorted { $0.memberName < $1.memberName }
@@ -166,6 +215,7 @@ final class PDFGenerator {
             totalContributions: calc.totalContributions(),
             totalOutstandingLoans: calc.totalOutstandingLoans(),
             activeMembersCount: activeMembers.count,
+            activeLoansCount: activeLoans.count,
             memberRows: memberRows,
             activeLoans: activeLoans
         )
@@ -256,21 +306,333 @@ final class PDFGenerator {
         return try renderPDF(pageRect: pageRect, auxiliary: auxiliary, fileNameStem: "ParachichiHouse_Statement_\(s.month.fileNameLabel)") { rect in
             var y = rect.height - 50
             y = drawHeader(in: rect, at: y, subtitle: "Statement for \(s.month.displayName)")
-            y -= 8
-            y = drawMetricsRow(in: rect, at: y, snapshot: s)
-            y -= 16
+            y -= 18
+            y = drawHeroBand(in: rect, at: y, snapshot: s)
+            y -= 24
+
+            y = drawSavingsStandings(in: rect, at: y, snapshot: s)
 
             if !s.activeLoans.isEmpty {
-                y = drawSection(title: "Active Loans (\(s.activeLoans.count))", in: rect, at: y)
-                y = drawActiveLoanTable(in: rect, at: y, loans: s.activeLoans)
-                y -= 16
+                y -= 18
+                y = drawLoanProgressSection(in: rect, at: y, loans: s.activeLoans)
             }
-
-            y = drawSection(title: "Member Summary", in: rect, at: y)
-            _ = drawMemberSummaryTable(in: rect, at: y, rows: s.memberRows)
 
             drawFooter(in: rect, label: "Statement for \(s.month.displayName)")
         }
+    }
+
+    // MARK: Monthly — Hero band
+
+    /// One big Fund Balance number with an inline secondary stat strip
+    /// underneath. Replaces the v1 four-card metric row.
+    private func drawHeroBand(in pageRect: CGRect, at y: CGFloat, snapshot s: MonthlyStatementSnapshot) -> CGFloat {
+        let leftMargin: CGFloat = 40
+
+        // Eyebrow label
+        let eyebrowAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: NSColor.darkGray,
+            .kern: 1.5
+        ]
+        "FUND BALANCE".draw(at: CGPoint(x: leftMargin, y: y - 12), withAttributes: eyebrowAttrs)
+
+        // Hero number
+        let heroAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 38, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        let hero = CurrencyFormatter.shared.format(s.fundBalance)
+        hero.draw(at: CGPoint(x: leftMargin, y: y - 52), withAttributes: heroAttrs)
+
+        // Divider rule under the number
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.30).cgColor)
+        cg?.setLineWidth(0.5)
+        cg?.move(to: CGPoint(x: leftMargin, y: y - 60))
+        cg?.addLine(to: CGPoint(x: pageRect.width - leftMargin, y: y - 60))
+        cg?.strokePath()
+        cg?.restoreGState()
+
+        // Secondary stat strip
+        let stripAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.darkGray
+        ]
+        let line1 = "\(CurrencyFormatter.shared.format(s.totalContributions)) contributed   ·   \(CurrencyFormatter.shared.format(s.totalOutstandingLoans)) in active loans"
+        line1.draw(at: CGPoint(x: leftMargin, y: y - 78), withAttributes: stripAttrs)
+
+        let memberWord = s.activeMembersCount == 1 ? "member" : "members"
+        let loanWord = s.activeLoansCount == 1 ? "loan" : "loans"
+        let line2 = "\(s.activeMembersCount) active \(memberWord)   ·   \(s.activeLoansCount) \(loanWord) being repaid"
+        line2.draw(at: CGPoint(x: leftMargin, y: y - 94), withAttributes: stripAttrs)
+
+        return y - 100
+    }
+
+    // MARK: Monthly — Savings Standings (podium + list)
+
+    private func drawSavingsStandings(in pageRect: CGRect, at yIn: CGFloat,
+                                      snapshot s: MonthlyStatementSnapshot) -> CGFloat {
+        var y = yIn
+        let leftMargin: CGFloat = 40
+
+        // Section heading with trophy
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        "🏆  Savings Standings".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
+        y -= 26
+
+        // Rank: contributions DESC, tiebreak by joinDate ASC (longer-tenured first).
+        let ranked = s.memberRows.sorted { lhs, rhs in
+            if lhs.contributions != rhs.contributions {
+                return lhs.contributions > rhs.contributions
+            }
+            switch (lhs.joinDate, rhs.joinDate) {
+            case (let l?, let r?): return l < r
+            case (.some, .none): return true
+            case (.none, .some): return false
+            case (.none, .none): return lhs.name < rhs.name
+            }
+        }
+
+        let topThree = Array(ranked.prefix(3))
+        let rest = Array(ranked.dropFirst(3))
+
+        // Podium
+        if !topThree.isEmpty {
+            let availableWidth = pageRect.width - leftMargin * 2
+            let spacing: CGFloat = 12
+            let cardCount = max(topThree.count, 1)
+            let cardWidth = (availableWidth - spacing * CGFloat(cardCount - 1)) / CGFloat(cardCount)
+            let cardHeight: CGFloat = 110
+
+            var x = leftMargin
+            for (index, row) in topThree.enumerated() {
+                drawPodiumCard(
+                    at: CGRect(x: x, y: y - cardHeight, width: cardWidth, height: cardHeight),
+                    rank: index,
+                    row: row
+                )
+                x += cardWidth + spacing
+            }
+            y -= cardHeight + 14
+        }
+
+        // Compact list for ranks 4+
+        if !rest.isEmpty {
+            for row in rest {
+                drawSecondaryRankRow(at: y, leftMargin: leftMargin, contentWidth: pageRect.width - leftMargin * 2, row: row)
+                y -= 22
+            }
+        }
+
+        return y
+    }
+
+    private func drawPodiumCard(at rect: CGRect, rank: Int, row: MonthlyStatementSnapshot.MemberRow) {
+        let cg = NSGraphicsContext.current?.cgContext
+
+        // Background tint based on rank
+        let bgColor: NSColor = {
+            switch rank {
+            case 0: return NSColor.systemYellow.withAlphaComponent(0.12)
+            case 1: return NSColor.systemGray.withAlphaComponent(0.10)
+            case 2: return NSColor(calibratedRed: 0.80, green: 0.50, blue: 0.20, alpha: 0.10)
+            default: return NSColor.systemGray.withAlphaComponent(0.05)
+            }
+        }()
+        cg?.saveGState()
+        cg?.setFillColor(bgColor.cgColor)
+        NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
+        cg?.restoreGState()
+
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.20).cgColor)
+        cg?.setLineWidth(0.5)
+        NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).stroke()
+        cg?.restoreGState()
+
+        // Medal row — crown only for #1, otherwise just the medal.
+        let medal: String = ["🥇", "🥈", "🥉"][min(rank, 2)]
+        let medalLine = rank == 0 ? "👑  🥇" : medal
+        let medalAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 22)
+        ]
+        let medalSize = medalLine.size(withAttributes: medalAttrs)
+        medalLine.draw(
+            at: CGPoint(x: rect.midX - medalSize.width / 2, y: rect.maxY - 36),
+            withAttributes: medalAttrs
+        )
+
+        // Name (centered)
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        let nameSize = row.name.size(withAttributes: nameAttrs)
+        row.name.draw(
+            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 44),
+            withAttributes: nameAttrs
+        )
+
+        // Role (centered, secondary)
+        let roleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9),
+            .foregroundColor: NSColor.darkGray
+        ]
+        let roleSize = row.role.size(withAttributes: roleAttrs)
+        row.role.draw(
+            at: CGPoint(x: rect.midX - roleSize.width / 2, y: rect.minY + 30),
+            withAttributes: roleAttrs
+        )
+
+        // Amount (centered, larger)
+        let amountAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        let amountStr = CurrencyFormatter.shared.format(row.contributions)
+        let amountSize = amountStr.size(withAttributes: amountAttrs)
+        amountStr.draw(
+            at: CGPoint(x: rect.midX - amountSize.width / 2, y: rect.minY + 10),
+            withAttributes: amountAttrs
+        )
+    }
+
+    private func drawSecondaryRankRow(at y: CGFloat, leftMargin: CGFloat,
+                                      contentWidth: CGFloat,
+                                      row: MonthlyStatementSnapshot.MemberRow) {
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.black
+        ]
+        row.name.draw(at: CGPoint(x: leftMargin + 8, y: y - 14), withAttributes: nameAttrs)
+
+        let roleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.darkGray
+        ]
+        row.role.draw(at: CGPoint(x: leftMargin + 180, y: y - 14), withAttributes: roleAttrs)
+
+        let amountAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor.black
+        ]
+        let para = NSMutableParagraphStyle()
+        para.alignment = .right
+        var attrs = amountAttrs
+        attrs[.paragraphStyle] = para
+        let amountStr = CurrencyFormatter.shared.format(row.contributions)
+        let amountRect = CGRect(x: leftMargin + contentWidth - 130, y: y - 14, width: 130 - 4, height: 14)
+        amountStr.draw(in: amountRect, withAttributes: attrs)
+
+        // Faint divider
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.18).cgColor)
+        cg?.setLineWidth(0.5)
+        cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 18))
+        cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 18))
+        cg?.strokePath()
+        cg?.restoreGState()
+    }
+
+    // MARK: Monthly — Loan Repayment Progress
+
+    private func drawLoanProgressSection(in pageRect: CGRect, at yIn: CGFloat,
+                                         loans: [MonthlyStatementSnapshot.LoanRow]) -> CGFloat {
+        var y = yIn
+        let leftMargin: CGFloat = 40
+
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        "💪  Loan Repayment Progress".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
+        y -= 26
+
+        for loan in loans {
+            drawLoanProgressCard(in: pageRect, at: y, loan: loan)
+            y -= 64
+        }
+        return y
+    }
+
+    private func drawLoanProgressCard(in pageRect: CGRect, at yTop: CGFloat,
+                                      loan: MonthlyStatementSnapshot.LoanRow) {
+        let leftMargin: CGFloat = 40
+        let rightMargin: CGFloat = 40
+        let contentWidth = pageRect.width - leftMargin - rightMargin
+
+        // Member name (left)
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.black
+        ]
+        loan.memberName.draw(at: CGPoint(x: leftMargin, y: yTop - 14), withAttributes: nameAttrs)
+
+        // Percent + marker (right)
+        let percentLabel = "\(Int((loan.percentRepaid * 100).rounded())) % repaid"
+        let markerSpace = loan.marker.emoji.isEmpty ? "" : "  \(loan.marker.emoji)"
+        let percentText = "\(percentLabel)\(markerSpace)"
+        let percentAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: loan.isOverdue ? NSColor.systemRed : NSColor.darkGray
+        ]
+        let para = NSMutableParagraphStyle()
+        para.alignment = .right
+        var pAttrs = percentAttrs
+        pAttrs[.paragraphStyle] = para
+        let percentRect = CGRect(x: leftMargin, y: yTop - 14, width: contentWidth, height: 14)
+        percentText.draw(in: percentRect, withAttributes: pAttrs)
+
+        // Progress bar
+        let barY = yTop - 30
+        let barHeight: CGFloat = 8
+        let barRect = CGRect(x: leftMargin, y: barY, width: contentWidth, height: barHeight)
+
+        let cg = NSGraphicsContext.current?.cgContext
+        cg?.saveGState()
+        cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.18).cgColor)
+        NSBezierPath(roundedRect: barRect, xRadius: 4, yRadius: 4).fill()
+        cg?.restoreGState()
+
+        let fillWidth = contentWidth * CGFloat(loan.percentRepaid)
+        if fillWidth > 0.5 {
+            let fillRect = CGRect(x: leftMargin, y: barY, width: fillWidth, height: barHeight)
+            cg?.saveGState()
+            NSBezierPath(roundedRect: fillRect, xRadius: 4, yRadius: 4).addClip()
+            let colors: CFArray = [
+                NSColor.systemGreen.withAlphaComponent(0.65).cgColor,
+                NSColor.systemGreen.cgColor
+            ] as CFArray
+            let space = CGColorSpaceCreateDeviceRGB()
+            if let gradient = CGGradient(colorsSpace: space, colors: colors, locations: [0, 1]) {
+                cg?.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: leftMargin, y: barY),
+                    end: CGPoint(x: leftMargin + fillWidth, y: barY),
+                    options: []
+                )
+            }
+            cg?.restoreGState()
+        }
+
+        // Sub-line: remaining + next due
+        let subAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.darkGray
+        ]
+        let remainingPart = "\(CurrencyFormatter.shared.format(loan.balance)) of \(CurrencyFormatter.shared.format(loan.originalAmount)) remaining"
+        let nextPart: String = {
+            guard let due = loan.nextPaymentDue, loan.balance > 0.01 else { return "" }
+            return "Next: \(CurrencyFormatter.shared.format(loan.monthlyPayment)) due \(DateFormatter.fullDate.string(from: due))"
+        }()
+        let subText = nextPart.isEmpty ? remainingPart : "\(remainingPart)   ·   \(nextPart)"
+        subText.draw(at: CGPoint(x: leftMargin, y: yTop - 50), withAttributes: subAttrs)
     }
 
     // MARK: Rendering — Member Statement
@@ -443,177 +805,6 @@ final class PDFGenerator {
             .foregroundColor: NSColor.black
         ]
         title.draw(at: CGPoint(x: 40, y: y - 14), withAttributes: attrs)
-        return y - 22
-    }
-
-    // MARK: Monthly — metrics row
-
-    private func drawMetricsRow(in pageRect: CGRect, at y: CGFloat, snapshot s: MonthlyStatementSnapshot) -> CGFloat {
-        let leftMargin: CGFloat = 40
-        let rightMargin: CGFloat = 40
-        let availableWidth = pageRect.width - leftMargin - rightMargin
-        let cardCount = 4
-        let spacing: CGFloat = 10
-        let cardWidth = (availableWidth - spacing * CGFloat(cardCount - 1)) / CGFloat(cardCount)
-        let cardHeight: CGFloat = 70
-
-        let cards: [(String, String, NSColor)] = [
-            ("Fund Balance",       CurrencyFormatter.shared.format(s.fundBalance),           .systemGreen),
-            ("Total Contributions", CurrencyFormatter.shared.format(s.totalContributions),    .systemBlue),
-            ("Outstanding Loans",  CurrencyFormatter.shared.format(s.totalOutstandingLoans), .systemOrange),
-            ("Active Members",     "\(s.activeMembersCount)",                                .systemPurple)
-        ]
-
-        var x = leftMargin
-        for (title, value, tint) in cards {
-            drawMetricCard(at: CGRect(x: x, y: y - cardHeight, width: cardWidth, height: cardHeight),
-                           title: title, value: value, tint: tint)
-            x += cardWidth + spacing
-        }
-        return y - cardHeight
-    }
-
-    private func drawMetricCard(at rect: CGRect, title: String, value: String, tint: NSColor) {
-        let cg = NSGraphicsContext.current?.cgContext
-        cg?.saveGState()
-        cg?.setFillColor(NSColor.white.cgColor)
-        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
-        cg?.restoreGState()
-
-        // Accent bar
-        cg?.saveGState()
-        cg?.setFillColor(tint.cgColor)
-        cg?.fill(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 3))
-        cg?.restoreGState()
-
-        // Border
-        cg?.saveGState()
-        cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.20).cgColor)
-        cg?.setLineWidth(0.5)
-        NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).stroke()
-        cg?.restoreGState()
-
-        let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
-            .foregroundColor: NSColor.darkGray
-        ]
-        title.draw(at: CGPoint(x: rect.minX + 10, y: rect.maxY - 22), withAttributes: titleAttrs)
-
-        let valueAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
-            .foregroundColor: NSColor.black
-        ]
-        value.draw(at: CGPoint(x: rect.minX + 10, y: rect.minY + 14), withAttributes: valueAttrs)
-    }
-
-    // MARK: Monthly — Active loan table
-
-    private func drawActiveLoanTable(in pageRect: CGRect, at yStart: CGFloat,
-                                     loans: [MonthlyStatementSnapshot.LoanRow]) -> CGFloat {
-        let leftMargin: CGFloat = 40
-        let widths: [CGFloat] = [180, 100, 100, 100, 60]  // name, amount, balance, monthly, due
-        let headers = ["Member", "Amount", "Balance", "Monthly", "Due"]
-        var y = drawTableHeader(headers, widths: widths, at: yStart, leftMargin: leftMargin)
-
-        for (index, loan) in loans.enumerated() {
-            // Alternating row background
-            if index % 2 == 1 {
-                let cg = NSGraphicsContext.current?.cgContext
-                cg?.saveGState()
-                cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.05).cgColor)
-                cg?.fill(CGRect(x: leftMargin - 4, y: y - 18, width: widths.reduce(0, +) + 8, height: 18))
-                cg?.restoreGState()
-            }
-
-            let dueLabel: String = {
-                guard let date = loan.dueDate else { return "—" }
-                return DateFormatter.shortMonth.string(from: date)
-            }()
-            let values = [
-                loan.memberName,
-                CurrencyFormatter.shared.format(loan.originalAmount),
-                CurrencyFormatter.shared.format(loan.balance),
-                CurrencyFormatter.shared.format(loan.monthlyPayment),
-                dueLabel
-            ]
-            drawTableRow(values, widths: widths, at: y, leftMargin: leftMargin, bold: false)
-            y -= 18
-        }
-
-        // Totals
-        y -= 4
-        let cg = NSGraphicsContext.current?.cgContext
-        cg?.saveGState()
-        cg?.setStrokeColor(NSColor.systemGray.cgColor)
-        cg?.setLineWidth(1)
-        cg?.move(to: CGPoint(x: leftMargin, y: y + 2))
-        cg?.addLine(to: CGPoint(x: leftMargin + widths.reduce(0, +), y: y + 2))
-        cg?.strokePath()
-        cg?.restoreGState()
-
-        let totalAmount = loans.reduce(0) { $0 + $1.originalAmount }
-        let totalBalance = loans.reduce(0) { $0 + $1.balance }
-        let totalMonthly = loans.reduce(0) { $0 + $1.monthlyPayment }
-        drawTableRow(
-            ["Total",
-             CurrencyFormatter.shared.format(totalAmount),
-             CurrencyFormatter.shared.format(totalBalance),
-             CurrencyFormatter.shared.format(totalMonthly),
-             ""],
-            widths: widths, at: y - 4, leftMargin: leftMargin, bold: true
-        )
-        return y - 22
-    }
-
-    // MARK: Monthly — Member summary table
-
-    private func drawMemberSummaryTable(in pageRect: CGRect, at yStart: CGFloat,
-                                        rows: [MonthlyStatementSnapshot.MemberRow]) -> CGFloat {
-        let leftMargin: CGFloat = 40
-        let widths: [CGFloat] = [150, 110, 100, 100, 80]  // name, role, contrib, loan, monthly
-        let headers = ["Name", "Role", "Contributions", "Loan Balance", "Monthly Due"]
-        var y = drawTableHeader(headers, widths: widths, at: yStart, leftMargin: leftMargin)
-
-        for (index, row) in rows.enumerated() {
-            if index % 2 == 1 {
-                let cg = NSGraphicsContext.current?.cgContext
-                cg?.saveGState()
-                cg?.setFillColor(NSColor.systemGray.withAlphaComponent(0.05).cgColor)
-                cg?.fill(CGRect(x: leftMargin - 4, y: y - 18, width: widths.reduce(0, +) + 8, height: 18))
-                cg?.restoreGState()
-            }
-            let values = [
-                row.name,
-                row.role,
-                CurrencyFormatter.shared.format(row.contributions),
-                row.loanBalance > 0 ? CurrencyFormatter.shared.format(row.loanBalance) : "—",
-                row.monthlyPayment > 0 ? CurrencyFormatter.shared.format(row.monthlyPayment) : "—"
-            ]
-            drawTableRow(values, widths: widths, at: y, leftMargin: leftMargin, bold: false)
-            y -= 18
-        }
-
-        // Totals
-        y -= 4
-        let cg = NSGraphicsContext.current?.cgContext
-        cg?.saveGState()
-        cg?.setStrokeColor(NSColor.systemGray.cgColor)
-        cg?.setLineWidth(1)
-        cg?.move(to: CGPoint(x: leftMargin, y: y + 2))
-        cg?.addLine(to: CGPoint(x: leftMargin + widths.reduce(0, +), y: y + 2))
-        cg?.strokePath()
-        cg?.restoreGState()
-
-        let totalContrib = rows.reduce(0) { $0 + $1.contributions }
-        let totalLoan = rows.reduce(0) { $0 + $1.loanBalance }
-        let totalMonthly = rows.reduce(0) { $0 + $1.monthlyPayment }
-        drawTableRow(
-            ["Total", "",
-             CurrencyFormatter.shared.format(totalContrib),
-             CurrencyFormatter.shared.format(totalLoan),
-             CurrencyFormatter.shared.format(totalMonthly)],
-            widths: widths, at: y - 4, leftMargin: leftMargin, bold: true
-        )
         return y - 22
     }
 
