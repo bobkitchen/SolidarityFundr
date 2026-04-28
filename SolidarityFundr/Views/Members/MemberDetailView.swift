@@ -8,6 +8,7 @@
 import SwiftUI
 import Charts
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct MemberDetailView: View {
     @ObservedObject var member: Member
@@ -24,11 +25,15 @@ struct MemberDetailView: View {
     @State private var newLoanPrefillAmount: Double?
     @State private var newLoanPrefillMonths: Int?
 
-    /// PhotosPicker selection — drives the upload pipeline below the
-    /// avatar. Keeping this on MemberDetailView (rather than inside the
-    /// avatar component) so the same component can be re-used in
-    /// read-only contexts without dragging Photos in.
+    /// Photo upload state. Two entry points:
+    /// - Photos library via `PhotosPicker` (limited to iCloud Photos).
+    /// - Any image file on disk via `.fileImporter` (the general-purpose
+    ///   path — JPEGs sent over email, screenshots, scans, etc.).
+    /// Both funnel through `MemberPhotoProcessor.process` and end up in
+    /// the same `member.photoData` field.
     @State private var photoPickerItem: PhotosPickerItem?
+    @State private var showingFileImporter = false
+    @State private var showingPhotosPicker = false
     @State private var isProcessingPhoto = false
 
     var body: some View {
@@ -195,17 +200,38 @@ struct MemberDetailView: View {
         }
     }
 
-    /// Tap-to-upload avatar. Wraps the shared `MemberAvatar` in a
-    /// `PhotosPicker` so the admin can choose a photo from their library
-    /// directly from the member page. A small camera-overlay hint sits
-    /// in the bottom-right so the affordance is discoverable without
-    /// being loud.
+    /// Tap-to-upload avatar. Tap reveals a small Menu offering both:
+    /// - "Choose File…" → `.fileImporter` for any image on disk
+    /// - "Choose from Photos…" → `PhotosPicker` for iCloud Photos
+    /// File is the primary path (less friction; no Photos.app round-trip
+    /// required for emailed JPGs / scans / screenshots), Photos stays as
+    /// a secondary affordance for users on the iCloud Photos workflow.
+    /// A small camera-overlay hint in the bottom-right makes the
+    /// affordance discoverable.
     private var avatarPicker: some View {
-        PhotosPicker(selection: $photoPickerItem, matching: .images, photoLibrary: .shared()) {
+        Menu {
+            Button {
+                showingFileImporter = true
+            } label: {
+                Label("Choose File…", systemImage: "folder")
+            }
+            Button {
+                showingPhotosPicker = true
+            } label: {
+                Label("Choose from Photos…", systemImage: "photo.on.rectangle")
+            }
+            if member.photoData != nil {
+                Divider()
+                Button(role: .destructive) {
+                    removeCurrentPhoto()
+                } label: {
+                    Label("Remove Photo", systemImage: "trash")
+                }
+            }
+        } label: {
             ZStack(alignment: .bottomTrailing) {
                 MemberAvatar(member: member, size: 64)
 
-                // Camera overlay — half-baked-in, half-floating.
                 Image(systemName: "camera.fill")
                     .font(.caption2)
                     .foregroundStyle(.white)
@@ -222,11 +248,22 @@ struct MemberDetailView: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .help("Change photo")
+        .photosPicker(isPresented: $showingPhotosPicker,
+                      selection: $photoPickerItem,
+                      matching: .images,
+                      photoLibrary: .shared())
         .onChange(of: photoPickerItem) { _, newItem in
             guard let newItem else { return }
             applyPickedPhoto(newItem)
+        }
+        .fileImporter(isPresented: $showingFileImporter,
+                      allowedContentTypes: [.image],
+                      allowsMultipleSelection: false) { result in
+            handleFileImporter(result)
         }
     }
 
@@ -245,12 +282,45 @@ struct MemberDetailView: View {
                 return
             }
 
-            await MainActor.run {
-                member.photoData = processed
-                member.updatedAt = Date()
-                try? PersistenceController.shared.container.viewContext.save()
-            }
+            await persist(processed)
         }
+    }
+
+    private func handleFileImporter(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        isProcessingPhoto = true
+        Task {
+            defer {
+                Task { @MainActor in
+                    isProcessingPhoto = false
+                }
+            }
+
+            // Sandbox-scoped resource access: required when the user has
+            // picked a file outside the app's container.
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+            guard let raw = try? Data(contentsOf: url),
+                  let processed = MemberPhotoProcessor.process(raw) else {
+                return
+            }
+            await persist(processed)
+        }
+    }
+
+    @MainActor
+    private func persist(_ data: Data) {
+        member.photoData = data
+        member.updatedAt = Date()
+        try? PersistenceController.shared.container.viewContext.save()
+    }
+
+    @MainActor
+    private func removeCurrentPhoto() {
+        member.photoData = nil
+        member.updatedAt = Date()
+        try? PersistenceController.shared.container.viewContext.save()
     }
 
     @ViewBuilder
@@ -937,6 +1007,7 @@ struct EditMemberSheet: View {
     @State private var overrideReason: String = ""
     
     @State private var photoPickerItem: PhotosPickerItem?
+    @State private var showingFileImporter = false
     @State private var isProcessingPhoto = false
 
     var body: some View {
@@ -946,11 +1017,20 @@ struct EditMemberSheet: View {
                     HStack(spacing: 16) {
                         MemberAvatar(member: member, size: 64)
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            PhotosPicker("Choose Photo…",
-                                         selection: $photoPickerItem,
-                                         matching: .images,
-                                         photoLibrary: .shared())
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 12) {
+                                Button {
+                                    showingFileImporter = true
+                                } label: {
+                                    Label("Choose File…", systemImage: "folder")
+                                }
+                                PhotosPicker(selection: $photoPickerItem,
+                                             matching: .images,
+                                             photoLibrary: .shared()) {
+                                    Label("From Photos…", systemImage: "photo.on.rectangle")
+                                }
+                            }
+
                             if member.photoData != nil {
                                 Button(role: .destructive) {
                                     member.photoData = nil
@@ -972,6 +1052,11 @@ struct EditMemberSheet: View {
                     .onChange(of: photoPickerItem) { _, newItem in
                         guard let newItem else { return }
                         loadAndApplyPhoto(newItem)
+                    }
+                    .fileImporter(isPresented: $showingFileImporter,
+                                  allowedContentTypes: [.image],
+                                  allowsMultipleSelection: false) { result in
+                        handleFileImporter(result)
                     }
                 }
 
@@ -1221,6 +1306,29 @@ struct EditMemberSheet: View {
                 }
             }
             guard let raw = try? await item.loadTransferable(type: Data.self),
+                  let processed = MemberPhotoProcessor.process(raw) else {
+                return
+            }
+            await MainActor.run {
+                member.photoData = processed
+                member.updatedAt = Date()
+                try? PersistenceController.shared.container.viewContext.save()
+            }
+        }
+    }
+
+    private func handleFileImporter(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        isProcessingPhoto = true
+        Task {
+            defer {
+                Task { @MainActor in
+                    isProcessingPhoto = false
+                }
+            }
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+            guard let raw = try? Data(contentsOf: url),
                   let processed = MemberPhotoProcessor.process(raw) else {
                 return
             }
