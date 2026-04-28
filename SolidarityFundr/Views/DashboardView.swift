@@ -12,7 +12,7 @@ import Charts
 import CoreData
 
 enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
-    case overview, members, loans, payments, reports
+    case overview, members, loans, payments, reports, history
 
     var id: Self { self }
 
@@ -23,6 +23,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .loans: "Loans"
         case .payments: "Payments"
         case .reports: "Reports"
+        case .history: "History"
         }
     }
 
@@ -36,6 +37,7 @@ enum DashboardSection: String, CaseIterable, Identifiable, Hashable {
         case .loans:    "creditcard"
         case .payments: "dollarsign.circle"
         case .reports:  "doc.text"
+        case .history:  "clock.arrow.circlepath"
         }
     }
 }
@@ -154,6 +156,7 @@ struct DashboardView: View {
             case .loans: LoansListView()
             case .payments: PaymentsView()
             case .reports: ReportsView()
+            case .history: HistoryView()
             }
         }
         .tint(section.tint)

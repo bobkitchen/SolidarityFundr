@@ -89,39 +89,67 @@ class DataManager: ObservableObject {
         member.memberStatus = .active
         member.totalContributions = 0
         member.smsOptIn = smsOptIn && phoneNumber != nil && PhoneNumberValidator.validate(phoneNumber ?? "")
-        
+
         saveContext()
         fetchMembers()
-        
+
+        AuditLogger.shared.log(
+            event: .memberCreated,
+            details: "\(name) — \(role.displayName)",
+            memberID: member.memberID
+        )
+
         return member
     }
-    
+
     func updateMember(_ member: Member) {
         member.updatedAt = Date()
         saveContext()
         fetchMembers()
+
+        AuditLogger.shared.log(
+            event: .memberModified,
+            details: member.name ?? "Unknown",
+            memberID: member.memberID
+        )
     }
-    
+
     func suspendMember(_ member: Member) {
         member.memberStatus = .suspended
         member.suspendedDate = Date()
         member.updatedAt = Date()
         saveContext()
         fetchMembers()
+
+        AuditLogger.shared.log(
+            event: .memberSuspended,
+            details: member.name ?? "Unknown",
+            memberID: member.memberID
+        )
     }
-    
+
     func reactivateMember(_ member: Member) {
         member.memberStatus = .active
         member.suspendedDate = nil
         member.updatedAt = Date()
         saveContext()
         fetchMembers()
+
+        AuditLogger.shared.log(
+            event: .memberReactivated,
+            details: member.name ?? "Unknown",
+            memberID: member.memberID
+        )
     }
-    
+
     func deleteMember(_ member: Member) throws {
         guard !member.hasActiveLoans else {
             throw DataManagerError.memberHasActiveLoans
         }
+
+        // Snapshot identifiers before delete so the audit entry survives.
+        let memberID = member.memberID
+        let name = member.name ?? "Unknown"
 
         // CloudKit doesn't support Cascade delete rules — relationships are
         // Nullify. Walk the member's owned graph and delete dependents
@@ -131,6 +159,12 @@ class DataManager: ObservableObject {
         context.delete(member)
         saveContext()
         fetchMembers()
+
+        AuditLogger.shared.log(
+            event: .memberDeleted,
+            details: name,
+            memberID: memberID
+        )
     }
 
     /// Walks every record that previously cascaded from a Member and deletes
@@ -382,10 +416,19 @@ class DataManager: ObservableObject {
         
         member.updatedAt = Date()
         saveContext()
-        
+
         // Refresh recent transactions
         fetchRecentTransactions()
-        
+
+        let kind = loan != nil ? "Loan repayment" : "Contribution"
+        AuditLogger.shared.log(
+            event: .paymentCreated,
+            details: "\(kind) — \(member.name ?? "Unknown")",
+            amount: amount,
+            memberID: member.memberID,
+            loanID: loan?.loanID
+        )
+
         return payment
     }
     
@@ -732,30 +775,44 @@ class DataManager: ObservableObject {
         )
 
         saveContext()
+
+        AuditLogger.shared.log(
+            event: .interestApplied,
+            details: String(format: "Applied at %.0f%% on KSH %.0f balance",
+                            rate * 100, preInterestBalance),
+            amount: interestAmount
+        )
     }
-    
+
     func cashOutMember(_ member: Member, amount: Double) throws {
         guard member.memberStatus != .active else {
             throw DataManagerError.cannotCashOutActiveMember
         }
-        
+
         guard !member.hasActiveLoans else {
             throw DataManagerError.memberHasActiveLoans
         }
-        
+
         member.cashOutAmount = amount
         member.cashOutDate = Date()
         member.memberStatus = .inactive
         member.updatedAt = Date()
-        
+
         createTransaction(
             for: member,
             amount: -amount,
             type: .cashOut,
             description: "Member cash out"
         )
-        
+
         saveContext()
+
+        AuditLogger.shared.log(
+            event: .memberCashedOut,
+            details: member.name ?? "Unknown",
+            amount: amount,
+            memberID: member.memberID
+        )
     }
     
     // MARK: - Reports

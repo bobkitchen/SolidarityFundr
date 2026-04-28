@@ -62,6 +62,7 @@ extension DashboardSection {
         case .loans:    return BrandColor.honey
         case .payments: return BrandColor.terracotta
         case .reports:  return BrandColor.indigoInk
+        case .history:  return BrandColor.rust
         }
     }
 }

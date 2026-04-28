@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreData
+import SwiftUI
 
 /// Audit entries are written via a dedicated background context so callers
 /// can log from any thread without corrupting `viewContext`. Entries are
@@ -15,13 +16,17 @@ class AuditLogger {
     static let shared = AuditLogger()
     private let persistenceController: PersistenceController
 
-    enum AuditEventType: String {
+    enum AuditEventType: String, CaseIterable {
         case authentication = "Authentication"
         case loanCreated = "Loan Created"
         case loanModified = "Loan Modified"
         case paymentCreated = "Payment Created"
         case memberCreated = "Member Created"
         case memberModified = "Member Modified"
+        case memberSuspended = "Member Suspended"
+        case memberReactivated = "Member Reactivated"
+        case memberCashedOut = "Member Cashed Out"
+        case memberDeleted = "Member Deleted"
         case dataExported = "Data Exported"
         case dataImported = "Data Imported"
         case settingsChanged = "Settings Changed"
@@ -29,6 +34,51 @@ class AuditLogger {
         case securitySettingsChanged = "Security Settings Changed"
         case sessionTimeout = "Session Timeout"
         case accessDenied = "Access Denied"
+
+        /// Symbol used in the History timeline for this event type.
+        var systemImage: String {
+            switch self {
+            case .authentication, .accessDenied, .sessionTimeout, .securitySettingsChanged:
+                return "lock.shield"
+            case .loanCreated, .loanModified:
+                return "creditcard"
+            case .paymentCreated:
+                return "dollarsign.circle"
+            case .memberCreated:
+                return "person.crop.circle.badge.plus"
+            case .memberModified:
+                return "person.crop.circle.badge"
+            case .memberSuspended:
+                return "person.crop.circle.badge.minus"
+            case .memberReactivated:
+                return "person.crop.circle.badge.checkmark"
+            case .memberCashedOut:
+                return "banknote"
+            case .memberDeleted:
+                return "person.crop.circle.badge.xmark"
+            case .dataExported:
+                return "square.and.arrow.up"
+            case .dataImported:
+                return "square.and.arrow.down"
+            case .settingsChanged:
+                return "gear"
+            case .interestApplied:
+                return "percent"
+            }
+        }
+
+        /// Tint colour for the timeline icon.
+        var tint: Color {
+            switch self {
+            case .accessDenied, .sessionTimeout, .memberDeleted: return .red
+            case .memberSuspended, .memberCashedOut, .interestApplied: return .orange
+            case .loanCreated, .loanModified: return BrandColor.honey
+            case .paymentCreated, .memberReactivated: return .green
+            case .memberCreated, .memberModified: return BrandColor.olive
+            case .dataExported, .dataImported, .settingsChanged: return .blue
+            case .authentication, .securitySettingsChanged: return .purple
+            }
+        }
     }
     
     private init() {
