@@ -199,6 +199,14 @@ class DataImportExport {
         return decoder
     }()
     
+    /// Wipe every Core Data entity for this app and merge the deletes into
+    /// the view context. Public so `DataManager.resetAllDataIncludingCloud`
+    /// can call it directly instead of routing through a no-op JSON import.
+    func wipeLocalStore() throws {
+        try clearAllData()
+        try context.save()
+    }
+
     private func clearAllData() throws {
         let entities = ["Transaction", "Payment", "Loan", "Member", "FundSettings"]
 

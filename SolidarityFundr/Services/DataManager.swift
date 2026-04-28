@@ -1282,8 +1282,8 @@ class DataManager: ObservableObject {
     //      a zone called `com.apple.coredata.cloudkit.zone`; deleting
     //      it equals "wipe everything for this app in iCloud" without
     //      touching the user's iCloud session.
-    //   2. Wipes the local Core Data store via the existing empty-JSON
-    //      import path.
+    //   2. Wipes the local Core Data store with NSBatchDeleteRequest
+    //      (via DataImportExport.wipeLocalStore).
     //   3. Resets fund settings to defaults.
     //
     // After this returns, the user can import a JSON backup and the
@@ -1344,9 +1344,11 @@ class DataManager: ObservableObject {
         // the next sync round-trip.
         try await Task.sleep(for: .seconds(1))
 
-        // 3. Wipe local data (same recipe as the existing "Reset All Data"
-        // path in SettingsView).
-        try DataImportExport.shared.importData(from: Data("{}".utf8))
+        // 3. Wipe local data with NSBatchDeleteRequest. The previous
+        // implementation routed through importData(from: "{}") which
+        // failed JSON decoding ("data couldn't be read because it is
+        // missing") and silently aborted the local wipe.
+        try DataImportExport.shared.wipeLocalStore()
         setupFundSettings()
         fetchMembers()
         fetchActiveLoans()
