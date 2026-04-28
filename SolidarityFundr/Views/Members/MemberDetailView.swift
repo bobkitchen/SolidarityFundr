@@ -75,11 +75,14 @@ struct MemberDetailView: View {
                         }
                     }
 
-                    if member.memberStatus != .active && !member.hasActiveLoans {
+                    // Cash-out is now reachable from any non-cashedOut state
+                    // (no need to suspend first). Pre-flight check on active
+                    // loans happens inside the sheet itself.
+                    if member.memberStatus != .cashedOut {
                         Button {
                             showingCashOutConfirmation = true
                         } label: {
-                            Label("Cash Out", systemImage: "banknote")
+                            Label("Cash Out…", systemImage: "banknote")
                         }
                     }
 
@@ -115,18 +118,8 @@ struct MemberDetailView: View {
                 preselectedMember: member
             )
         }
-        .confirmationDialog(
-            "Cash Out Member",
-            isPresented: $showingCashOutConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Confirm Cash Out") {
-                viewModel.cashOutMember(member)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            let amount = FundCalculator.shared.calculateMemberCashOut(member: member)
-            Text("This will cash out \(CurrencyFormatter.shared.format(amount)) including interest. This action cannot be undone.")
+        .sheet(isPresented: $showingCashOutConfirmation) {
+            CashOutMemberSheet(member: member)
         }
         .alert("Error", isPresented: $viewModel.showingError) {
             Button("OK") {}

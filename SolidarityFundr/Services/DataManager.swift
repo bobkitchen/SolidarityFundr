@@ -784,8 +784,26 @@ class DataManager: ObservableObject {
         )
     }
 
-    func cashOutMember(_ member: Member, amount: Double) throws {
-        guard member.memberStatus != .active else {
+    /// Records a member's formal departure from the fund.
+    ///
+    /// Settles the member's account by paying out their contributions plus
+    /// interest, transitions them to the terminal `.cashedOut` status, and
+    /// preserves their historical records. Eligible from any non-cashedOut
+    /// state (the previous "must be suspended first" requirement was
+    /// busywork).
+    ///
+    /// - Parameters:
+    ///   - member: The departing member.
+    ///   - amount: The settlement amount (typically `member.calculateCashOutAmount()`).
+    ///   - reason: Free-text reason captured for the audit log.
+    ///   - paymentMethod: How the payout was delivered (cash / M-Pesa / bank).
+    ///   - date: The effective cash-out date. Defaults to now.
+    func cashOutMember(_ member: Member,
+                       amount: Double,
+                       reason: String,
+                       paymentMethod: PaymentMethod,
+                       date: Date = Date()) throws {
+        guard member.memberStatus != .cashedOut else {
             throw DataManagerError.cannotCashOutActiveMember
         }
 
@@ -794,22 +812,28 @@ class DataManager: ObservableObject {
         }
 
         member.cashOutAmount = amount
-        member.cashOutDate = Date()
-        member.memberStatus = .inactive
+        member.cashOutDate = date
+        member.memberStatus = .cashedOut
         member.updatedAt = Date()
 
+        let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let descriptionParts = ["Cash out via \(paymentMethod.displayName)",
+                                trimmedReason.isEmpty ? nil : "— \(trimmedReason)"]
+            .compactMap { $0 }
         createTransaction(
             for: member,
             amount: -amount,
             type: .cashOut,
-            description: "Member cash out"
+            description: descriptionParts.joined(separator: " "),
+            date: date
         )
 
         saveContext()
+        fetchMembers()
 
         AuditLogger.shared.log(
             event: .memberCashedOut,
-            details: member.name ?? "Unknown",
+            details: "\(member.name ?? "Unknown") — \(paymentMethod.displayName)\(trimmedReason.isEmpty ? "" : " (\(trimmedReason))")",
             amount: amount,
             memberID: member.memberID
         )

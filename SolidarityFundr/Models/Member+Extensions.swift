@@ -223,15 +223,18 @@ enum MemberStatus: String, CaseIterable {
     case active = "active"
     case suspended = "suspended"
     case inactive = "inactive"
-    
+    /// Member has formally departed and received their settlement. Distinct
+    /// from `.inactive` (a soft, recoverable state) — `.cashedOut` is a
+    /// terminal state with a recorded payout. Records are preserved for
+    /// historical reports; the member is excluded from "active" rollups.
+    case cashedOut = "cashed_out"
+
     var displayName: String {
         switch self {
-        case .active:
-            return "Active"
-        case .suspended:
-            return "Suspended"
-        case .inactive:
-            return "Inactive"
+        case .active:    return "Active"
+        case .suspended: return "Suspended"
+        case .inactive:  return "Inactive"
+        case .cashedOut: return "Cashed Out"
         }
     }
 }

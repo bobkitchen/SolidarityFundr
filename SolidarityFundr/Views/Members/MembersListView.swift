@@ -498,23 +498,19 @@ struct StatusBadge: View {
     
     private var backgroundColor: Color {
         switch status {
-        case .active:
-            return .green.opacity(0.2)
-        case .suspended:
-            return .orange.opacity(0.2)
-        case .inactive:
-            return .gray.opacity(0.2)
+        case .active:    return .green.opacity(0.2)
+        case .suspended: return .orange.opacity(0.2)
+        case .inactive:  return .gray.opacity(0.2)
+        case .cashedOut: return .purple.opacity(0.18)
         }
     }
-    
+
     private var foregroundColor: Color {
         switch status {
-        case .active:
-            return .green
-        case .suspended:
-            return .orange
-        case .inactive:
-            return .gray
+        case .active:    return .green
+        case .suspended: return .orange
+        case .inactive:  return .gray
+        case .cashedOut: return .purple
         }
     }
 }

@@ -174,25 +174,37 @@ class MemberViewModel: ObservableObject {
         dataManager.reactivateMember(member)
     }
     
-    func cashOutMember(_ member: Member) {
+    /// Validates and posts a member cash-out.
+    /// - Returns: `true` if the cash-out was recorded; `false` if validation
+    ///   or persistence failed (with an error already set on the view model).
+    @discardableResult
+    func cashOutMember(_ member: Member,
+                       reason: String,
+                       paymentMethod: PaymentMethod,
+                       date: Date = Date()) -> Bool {
         clearError()
-        
-        // Validate cash out
+
         let validation = businessRules.validateCashOut(member: member)
-        
         if !validation.isValid {
             errorMessage = validation.errorMessage
             showingError = true
-            return
+            return false
         }
-        
-        let cashOutAmount = fundCalculator.calculateMemberCashOut(member: member)
-        
+
+        let amount = fundCalculator.calculateMemberCashOut(member: member)
         do {
-            try dataManager.cashOutMember(member, amount: cashOutAmount)
+            try dataManager.cashOutMember(
+                member,
+                amount: amount,
+                reason: reason,
+                paymentMethod: paymentMethod,
+                date: date
+            )
+            return true
         } catch {
             errorMessage = error.localizedDescription
             showingError = true
+            return false
         }
     }
     
