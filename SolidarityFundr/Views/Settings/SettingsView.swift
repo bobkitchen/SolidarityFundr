@@ -195,6 +195,8 @@ struct GeneralSettingsView: View {
     @State private var overrideMinimumBalance = false
     @State private var allowPartialPayments = false
     @State private var showingInterestAppliedAlert = false
+    @State private var showingApplyInterestSheet = false
+    @State private var showingWithdrawSheet = false
 
     var body: some View {
         Section("Fund Configuration") {
@@ -257,26 +259,36 @@ struct GeneralSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                let potentialInterest = FundCalculator.shared.calculateAnnualInterest(settings: fundSettings)
-                LabeledContent("Potential Interest") {
-                    Text(CurrencyFormatter.shared.format(potentialInterest))
-                        .foregroundStyle(potentialInterest > 0 ? .green : .secondary)
-                }
+
                 Button {
-                    dataManager.applyAnnualInterest()
-                    showingInterestAppliedAlert = true
+                    showingApplyInterestSheet = true
                 } label: {
-                    Label("Apply Annual Interest", systemImage: "percent")
+                    Label("Apply Interest…", systemImage: "percent")
                 }
-                .disabled(potentialInterest <= 0)
+
+                Button {
+                    showingWithdrawSheet = true
+                } label: {
+                    Label("Withdraw Funds…", systemImage: "arrow.up.right.square")
+                }
+                .disabled(fundSettings.bobRemainingInvestment <= 0)
             }
         } header: {
             Text("Fund Operations")
         } footer: {
-            Text("Applies the configured annual rate to the fund's total value. Once-yearly action.")
+            Text("Apply Interest distributes a chosen amount to active members proportionally to their contributions, sourced from your remaining capital or a fresh deposit. Withdraw Funds records cash leaving the fund and reducing your stake.")
         }
-        .alert("Annual interest applied", isPresented: $showingInterestAppliedAlert) {
-            Button("OK") {}
+        .sheet(isPresented: $showingApplyInterestSheet) {
+            NavigationStack {
+                ApplyInterestSheet()
+                    .environmentObject(dataManager)
+            }
+        }
+        .sheet(isPresented: $showingWithdrawSheet) {
+            NavigationStack {
+                WithdrawFundsSheet()
+                    .environmentObject(dataManager)
+            }
         }
         .onAppear { loadSettings() }
         // Auto-save on every change — macOS Settings convention.

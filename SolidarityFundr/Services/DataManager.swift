@@ -809,33 +809,179 @@ class DataManager: ObservableObject {
     
     // MARK: - Fund Operations
     
-    func applyAnnualInterest() {
-        guard let settings = fundSettings else { return }
+    /// Source of the interest payment.
+    ///
+    /// `fromCapital`  — Bob's existing investment is reclassified as
+    ///                  members' interest. Internal transfer; fund cash
+    ///                  unchanged. Used when Bob has remaining capital
+    ///                  in the fund to convert.
+    ///
+    /// `freshDeposit` — Bob deposits new cash that immediately becomes
+    ///                  member equity. Fund cash grows by the interest
+    ///                  amount. Used once Bob's capital is exhausted
+    ///                  but the annual commitment continues.
+    enum InterestSource {
+        case fromCapital
+        case freshDeposit
+    }
 
-        // Compute interest from the PRE-mutation balance so the recorded
-        // transaction amount equals the actual accrual. The previous
-        // double-subtraction formula happened to cancel arithmetically but
-        // read post-mutation state.
-        let preInterestBalance = settings.calculateFundBalance()
+    /// Distribute `amount` to active members proportionally to their
+    /// existing contributions, recording per-member interest credits.
+    ///
+    /// `fromCapital` decrements `bobRemainingInvestment` and leaves fund
+    /// cash unchanged. `freshDeposit` records an inflow first (fund cash
+    /// grows) and `bobRemainingInvestment` is untouched.
+    ///
+    /// Each member's `totalContributions` grows by their share so the
+    /// leaderboard, savings standings, and cash-out math all reflect the
+    /// new balance immediately.
+    func applyInterest(amount: Double, source: InterestSource, note: String? = nil) throws {
+        guard amount > 0 else { throw DataManagerError.invalidAmount }
+        guard let settings = fundSettings else { throw DataManagerError.invalidAmount }
+
+        let activeMembers = members.filter { $0.memberStatus == .active && $0.totalContributions > 0 }
+        let totalContribs = activeMembers.reduce(0) { $0 + $1.totalContributions }
+        guard totalContribs > 0, !activeMembers.isEmpty else {
+            throw DataManagerError.invalidAmount
+        }
+
+        if source == .fromCapital {
+            guard settings.bobRemainingInvestment >= amount else {
+                throw DataManagerError.insufficientFunds
+            }
+        }
+
+        // Pre-mutation balance from the most recent transaction.
+        let lastBalanceRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        lastBalanceRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
+        lastBalanceRequest.fetchLimit = 1
+        let preBalance = (try? context.fetch(lastBalanceRequest).first?.balance)
+            ?? settings.bobInitialInvestment
+
+        // For freshDeposit, fund cash grows by `amount` first. For
+        // fromCapital, fund cash is unchanged across the whole operation.
+        var workingBalance = preBalance
+        if source == .freshDeposit {
+            workingBalance += amount
+
+            let inflow = Transaction(context: context)
+            inflow.transactionID = UUID()
+            inflow.member = nil
+            inflow.amount = amount
+            inflow.balance = workingBalance
+            inflow.transactionType = .bobInvestment
+            inflow.transactionDate = Date()
+            inflow.transactionDescription = "Interest top-up — fresh deposit for distribution to members"
+            inflow.createdAt = Date()
+            inflow.updatedAt = Date()
+        }
+
+        // Distribute proportionally with residual-to-last to ensure the
+        // total adds up exactly even after rounding.
         let rate = settings.annualInterestRate
-        let interestAmount = preInterestBalance * rate
+        var distributed: Double = 0
+        let sortedMembers = activeMembers.sorted { ($0.name ?? "") < ($1.name ?? "") }
+        let lastIndex = sortedMembers.count - 1
+        let descriptionLabel = note ?? "Annual interest at \(Int(rate * 100))%"
 
-        settings.applyAnnualInterest()
+        for (i, member) in sortedMembers.enumerated() {
+            let share: Double
+            if i == lastIndex {
+                share = (amount - distributed).rounded(toPlaces: 2)
+            } else {
+                share = ((member.totalContributions / totalContribs) * amount).rounded(toPlaces: 2)
+                distributed += share
+            }
+            guard share > 0 else { continue }
 
-        createTransaction(
-            for: nil,
-            amount: interestAmount,
-            type: .interestApplied,
-            description: "Annual interest applied at \(Int(rate * 100))%"
-        )
+            member.totalContributions += share
+            member.updatedAt = Date()
+
+            // Per-member credit. Balance is unchanged by this single
+            // event under fromCapital (internal transfer) and unchanged
+            // *additionally* under freshDeposit (the inflow already
+            // recorded the cash growth).
+            let credit = Transaction(context: context)
+            credit.transactionID = UUID()
+            credit.member = member
+            credit.amount = share
+            credit.balance = workingBalance
+            credit.transactionType = .interestApplied
+            credit.transactionDate = Date()
+            credit.transactionDescription = "\(descriptionLabel) — share for \(member.name ?? "")"
+            credit.createdAt = Date()
+            credit.updatedAt = Date()
+        }
+
+        if source == .fromCapital {
+            settings.bobRemainingInvestment -= amount
+        }
+        settings.totalInterestApplied += amount
+        settings.lastInterestAppliedDate = Date()
+        settings.updatedAt = Date()
 
         saveContext()
+        fetchMembers()
+        fetchRecentTransactions()
 
+        let sourceLabel = source == .fromCapital ? "from capital" : "fresh deposit"
         AuditLogger.shared.log(
             event: .interestApplied,
-            details: String(format: "Applied at %.0f%% on KSH %.0f balance",
-                            rate * 100, preInterestBalance),
-            amount: interestAmount
+            details: "\(descriptionLabel) — KSH \(Int(amount)) distributed to \(sortedMembers.count) members (\(sourceLabel))",
+            amount: amount
+        )
+    }
+
+    // Backwards-compatible shim: the old "annual interest at the
+    // configured rate against the fund balance" call is preserved as a
+    // convenience that delegates to the new distributing method.
+    func applyAnnualInterest() {
+        guard let settings = fundSettings else { return }
+        let preInterestBalance = settings.calculateFundBalance()
+        let rate = settings.annualInterestRate
+        let amount = preInterestBalance * rate
+        let source: InterestSource = settings.bobRemainingInvestment >= amount ? .fromCapital : .freshDeposit
+        try? applyInterest(amount: amount, source: source)
+    }
+
+    /// Record Bob withdrawing `amount` of cash from the fund.
+    /// Decreases `bobRemainingInvestment` and the fund cash balance by
+    /// the same amount; staff balances are unaffected. The withdrawal
+    /// shows up in the ledger as a `bobWithdrawal` transaction.
+    func recordWithdrawal(amount: Double, note: String? = nil) throws {
+        guard amount > 0 else { throw DataManagerError.invalidAmount }
+        guard let settings = fundSettings else { throw DataManagerError.invalidAmount }
+        guard settings.bobRemainingInvestment >= amount else {
+            throw DataManagerError.insufficientFunds
+        }
+
+        let lastBalanceRequest: NSFetchRequest<Transaction> = Transaction.fetchRequest()
+        lastBalanceRequest.sortDescriptors = [NSSortDescriptor(keyPath: \Transaction.createdAt, ascending: false)]
+        lastBalanceRequest.fetchLimit = 1
+        let preBalance = (try? context.fetch(lastBalanceRequest).first?.balance)
+            ?? settings.bobInitialInvestment
+
+        let txn = Transaction(context: context)
+        txn.transactionID = UUID()
+        txn.member = nil
+        txn.amount = -amount
+        txn.balance = preBalance - amount
+        txn.transactionType = .bobWithdrawal
+        txn.transactionDate = Date()
+        txn.transactionDescription = note ?? "Withdrawal — Bob"
+        txn.createdAt = Date()
+        txn.updatedAt = Date()
+
+        settings.bobRemainingInvestment -= amount
+        settings.updatedAt = Date()
+
+        saveContext()
+        fetchRecentTransactions()
+
+        AuditLogger.shared.log(
+            event: .settingsChanged,
+            details: "Bob withdrawal — KSH \(Int(amount))",
+            amount: amount
         )
     }
 
@@ -1391,6 +1537,7 @@ enum DataManagerError: LocalizedError {
     case cannotCashOutActiveMember
     case insufficientFunds
     case cloudKitNotAuthenticated
+    case invalidAmount
 
     var errorDescription: String? {
         switch self {
@@ -1403,10 +1550,23 @@ enum DataManagerError: LocalizedError {
         case .cannotCashOutActiveMember:
             return "Cannot cash out an active member."
         case .insufficientFunds:
-            return "Insufficient funds in the solidarity fund."
+            return "Not enough funds available for this action."
         case .cloudKitNotAuthenticated:
             return "Not signed in to iCloud. Sign in to your Apple ID and try again."
+        case .invalidAmount:
+            return "The amount entered is invalid."
         }
+    }
+}
+
+private extension Double {
+    /// Round to a fixed number of decimal places. Used by the
+    /// proportional interest distribution to keep per-member shares
+    /// representable in currency units before the residual is added to
+    /// the last member.
+    func rounded(toPlaces places: Int) -> Double {
+        let multiplier = pow(10.0, Double(places))
+        return (self * multiplier).rounded() / multiplier
     }
 }
 
