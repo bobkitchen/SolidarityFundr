@@ -410,35 +410,31 @@ final class PDFGenerator {
             footerLabel: subtitle,
             fullHeader: { ctx in
                 let y = self.drawHeader(in: ctx.pageRect, at: ctx.topY, subtitle: subtitle)
-                return y - 18
+                return y - 14
             },
             continuationHeader: { ctx in
                 self.drawContinuationHeader(in: ctx.pageRect, at: ctx.topY, subtitle: subtitle)
             }
         ) { ctx in
-            // Top sections always fit on page 1: header was already drawn,
-            // hero / spotlights / this-month / member-list are bounded by the
-            // member roster, which for the foreseeable fund size leaves room
-            // for the loan section. If it ever doesn't, ensureSpace will
-            // overflow each loan card to a continuation page.
+            // Layout is sized so a 5-member, 3-loan fund fits comfortably on
+            // a single page. Pagination remains the safety net if the fund
+            // grows beyond that — each loan card is checked individually.
             ctx.currentY = drawHeroBand(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
-            ctx.currentY -= 22
+            ctx.currentY -= 14
 
             if !s.spotlights.isEmpty {
                 ctx.currentY = drawSpotlightRow(in: ctx.pageRect, at: ctx.currentY, awards: s.spotlights)
-                ctx.currentY -= 14
+                ctx.currentY -= 12
             }
 
             ctx.currentY = drawThisMonthStrip(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
-            ctx.currentY -= 18
+            ctx.currentY -= 14
 
             ctx.currentY = drawMemberReferenceList(in: ctx.pageRect, at: ctx.currentY, snapshot: s)
 
             if !s.activeLoans.isEmpty {
-                // Section header + at least one card must fit; otherwise
-                // start the loan section on page 2.
-                ctx.ensureSpace(26 + 56)
-                ctx.currentY -= 18
+                ctx.ensureSpace(22 + 56)
+                ctx.currentY -= 14
                 ctx.currentY = drawLoanProgressHeader(in: ctx.pageRect, at: ctx.currentY)
                 for loan in s.activeLoans {
                     ctx.ensureSpace(50)
@@ -462,40 +458,37 @@ final class PDFGenerator {
             .foregroundColor: NSColor.darkGray,
             .kern: 1.5
         ]
-        "FUND BALANCE".draw(at: CGPoint(x: leftMargin, y: y - 12), withAttributes: eyebrowAttrs)
+        "FUND BALANCE".draw(at: CGPoint(x: leftMargin, y: y - 11), withAttributes: eyebrowAttrs)
 
         // Hero number
         let heroAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 38, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 30, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
         let hero = CurrencyFormatter.shared.format(s.fundBalance)
-        hero.draw(at: CGPoint(x: leftMargin, y: y - 52), withAttributes: heroAttrs)
+        hero.draw(at: CGPoint(x: leftMargin, y: y - 44), withAttributes: heroAttrs)
 
         // Divider rule under the number
         let cg = NSGraphicsContext.current?.cgContext
         cg?.saveGState()
         cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.30).cgColor)
         cg?.setLineWidth(0.5)
-        cg?.move(to: CGPoint(x: leftMargin, y: y - 60))
-        cg?.addLine(to: CGPoint(x: pageRect.width - leftMargin, y: y - 60))
+        cg?.move(to: CGPoint(x: leftMargin, y: y - 50))
+        cg?.addLine(to: CGPoint(x: pageRect.width - leftMargin, y: y - 50))
         cg?.strokePath()
         cg?.restoreGState()
 
-        // Secondary stat strip
+        // Secondary stat strip — single line, four facts separated by middle dots.
         let stripAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.darkGray
         ]
-        let line1 = "\(CurrencyFormatter.shared.format(s.totalContributions)) contributed   ·   \(CurrencyFormatter.shared.format(s.totalOutstandingLoans)) in active loans"
-        line1.draw(at: CGPoint(x: leftMargin, y: y - 78), withAttributes: stripAttrs)
-
         let memberWord = s.activeMembersCount == 1 ? "member" : "members"
         let loanWord = s.activeLoansCount == 1 ? "loan" : "loans"
-        let line2 = "\(s.activeMembersCount) active \(memberWord)   ·   \(s.activeLoansCount) \(loanWord) being repaid"
-        line2.draw(at: CGPoint(x: leftMargin, y: y - 94), withAttributes: stripAttrs)
+        let line = "\(CurrencyFormatter.shared.format(s.totalContributions)) contributed   ·   \(CurrencyFormatter.shared.format(s.totalOutstandingLoans)) in active loans   ·   \(s.activeMembersCount) \(memberWord)   ·   \(s.activeLoansCount) \(loanWord) repaying"
+        line.draw(at: CGPoint(x: leftMargin, y: y - 64), withAttributes: stripAttrs)
 
-        return y - 100
+        return y - 70
     }
 
     // MARK: Monthly — Spotlight row (four recognition awards)
@@ -509,16 +502,15 @@ final class PDFGenerator {
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        "🏆  This Month's Spotlights".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
-        y -= 26
+        "🏆  This Month's Spotlights".draw(at: CGPoint(x: leftMargin, y: y - 12), withAttributes: titleAttrs)
+        y -= 22
 
         let availableWidth = pageRect.width - leftMargin * 2
         let spacing: CGFloat = 14
         let count = max(awards.count, 1)
         let cardWidth = (availableWidth - spacing * CGFloat(count - 1)) / CGFloat(count)
-        // 100pt fits a comfortable 5-member, 3-loan layout on one page;
-        // pagination catches anything larger.
-        let cardHeight: CGFloat = 100
+        // 96pt fits the page-1 budget; pagination catches anything larger.
+        let cardHeight: CGFloat = 96
 
         var x = leftMargin
         for award in awards {
@@ -553,18 +545,18 @@ final class PDFGenerator {
         NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).stroke()
         cg?.restoreGState()
 
-        // Layout (top → bottom inside a 100pt card):
-        //   eyebrow (10pt) — 14pt down from top
-        //   member name (16pt) — anchored at minY+52
-        //   primary value (22pt) — anchored at minY+22
-        //   detail (10pt) — anchored at minY+8
+        // Layout (top → bottom inside a 96pt card):
+        //   eyebrow (10pt) — 20pt down from top
+        //   member name (15pt) — anchored at minY+50
+        //   primary value (20pt) — anchored at minY+22
+        //   detail (9pt) — anchored at minY+8
         let eyebrowAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.darkGray,
             .kern: 0.8
         ]
         let eyebrow = "\(award.category.emoji)  \(award.category.title.uppercased())"
-        eyebrow.draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 22), withAttributes: eyebrowAttrs)
+        eyebrow.draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 20), withAttributes: eyebrowAttrs)
 
         let nameAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
@@ -572,7 +564,7 @@ final class PDFGenerator {
         ]
         let nameSize = award.memberName.size(withAttributes: nameAttrs)
         award.memberName.draw(
-            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 52),
+            at: CGPoint(x: rect.midX - nameSize.width / 2, y: rect.minY + 50),
             withAttributes: nameAttrs
         )
 
@@ -582,7 +574,7 @@ final class PDFGenerator {
         ]
         let valueSize = award.primaryValue.size(withAttributes: valueAttrs)
         award.primaryValue.draw(
-            at: CGPoint(x: rect.midX - valueSize.width / 2, y: rect.minY + 24),
+            at: CGPoint(x: rect.midX - valueSize.width / 2, y: rect.minY + 22),
             withAttributes: valueAttrs
         )
 
@@ -610,7 +602,7 @@ final class PDFGenerator {
         var y = yIn
         let leftMargin: CGFloat = 40
         let contentWidth = pageRect.width - leftMargin * 2
-        let stripHeight: CGFloat = 50
+        let stripHeight: CGFloat = 46
 
         // Card background — light avocado tint to read as "team" not "individual"
         let cg = NSGraphicsContext.current?.cgContext
@@ -633,11 +625,11 @@ final class PDFGenerator {
             .foregroundColor: NSColor.darkGray,
             .kern: 0.8
         ]
-        "THIS MONTH".draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 16), withAttributes: eyebrowAttrs)
+        "THIS MONTH".draw(at: CGPoint(x: rect.minX + 14, y: rect.maxY - 14), withAttributes: eyebrowAttrs)
 
         // Two lines, two stats each, separated by a middle dot.
         let lineAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.black
         ]
         let m = s.thisMonth
@@ -663,8 +655,8 @@ final class PDFGenerator {
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        "All Members".draw(at: CGPoint(x: leftMargin, y: y - 14), withAttributes: titleAttrs)
-        y -= 22
+        "All Members".draw(at: CGPoint(x: leftMargin, y: y - 12), withAttributes: titleAttrs)
+        y -= 20
 
         // Sort alphabetically — not a leaderboard, this section is for
         // reference. The recipient should be able to find their row fast.
@@ -717,12 +709,12 @@ final class PDFGenerator {
             cg?.saveGState()
             cg?.setStrokeColor(NSColor.systemGray.withAlphaComponent(0.15).cgColor)
             cg?.setLineWidth(0.5)
-            cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 16))
-            cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 16))
+            cg?.move(to: CGPoint(x: leftMargin + 8, y: y - 14))
+            cg?.addLine(to: CGPoint(x: leftMargin + contentWidth - 8, y: y - 14))
             cg?.strokePath()
             cg?.restoreGState()
 
-            y -= 18
+            y -= 16
         }
 
         // Legend — once, small, aligned right.
@@ -750,8 +742,8 @@ final class PDFGenerator {
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.black
         ]
-        "💪  Loan Repayment Progress".draw(at: CGPoint(x: leftMargin, y: yIn - 14), withAttributes: titleAttrs)
-        return yIn - 26
+        "💪  Loan Repayment Progress".draw(at: CGPoint(x: leftMargin, y: yIn - 12), withAttributes: titleAttrs)
+        return yIn - 22
     }
 
     private func drawLoanProgressCard(in pageRect: CGRect, at yTop: CGFloat,
@@ -825,7 +817,7 @@ final class PDFGenerator {
             return "Next: \(CurrencyFormatter.shared.format(loan.monthlyPayment)) due \(DateFormatter.fullDate.string(from: due))"
         }()
         let subText = nextPart.isEmpty ? remainingPart : "\(remainingPart)   ·   \(nextPart)"
-        subText.draw(at: CGPoint(x: leftMargin, y: yTop - 46), withAttributes: subAttrs)
+        subText.draw(at: CGPoint(x: leftMargin, y: yTop - 42), withAttributes: subAttrs)
     }
 
     // MARK: Rendering — Member Statement
